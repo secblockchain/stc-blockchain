@@ -1,0 +1,67 @@
+version: '3.9'
+
+services:
+  eth:
+    build:
+      context: ./go-ethereum
+      dockerfile: Dockerfile
+    image: evm-geth:local
+    container_name: eth
+    volumes:
+      - ./genesis.json:/genesis.json
+    ports:
+      - "8545:8545"
+      - "8546:8546"
+      - "30303:30303"
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /data
+        printf '%s\n' "$$ACCOUNT_PASSWORD" | tr -d '\r' > /data/password.txt
+        PK=$$(printf '%s' "$$ACCOUNT_PRIVATE_KEY" | tr -d ' \t\r\n' | sed 's/^0[xX]//')
+        PK_LEN=$$(printf '%s' "$$PK" | wc -c | tr -d ' ')
+        if [ "$$PK_LEN" -ne 64 ]; then
+          echo "ACCOUNT_PRIVATE_KEY must be 64 hex chars (optional 0x prefix). Got length $$PK_LEN." >&2
+          exit 1
+        fi
+        case "$$PK" in *[!0-9a-fA-F]*)
+          echo "ACCOUNT_PRIVATE_KEY contains non-hex characters." >&2
+          exit 1
+        ;; esac
+        if ! ls /data/keystore/* >/dev/null 2>&1; then
+          printf '%s\n' "$$PK" > /tmp/pk.txt
+          geth account import --datadir /data --password /data/password.txt /tmp/pk.txt || exit 1
+          rm -f /tmp/pk.txt
+        fi
+        ACCOUNT_ADDRESS=$$(geth account list --keystore /data/keystore 2>/dev/null | head -n 1 | sed 's/.*{\(.*\)}.*/\1/')
+        if [ -z "$$ACCOUNT_ADDRESS" ]; then
+          echo "No account in keystore; remove /data/keystore and retry if import previously failed." >&2
+          exit 1
+        fi
+        if [ ! -d /data/geth ]; then
+          sed "s/{ACCOUNT_ADDRESS}/$$ACCOUNT_ADDRESS/g" /genesis.json > /tmp/genesis.json
+          geth init --datadir /data /tmp/genesis.json || exit 1
+          rm -f /tmp/genesis.json
+        fi
+        exec geth \
+          --dev \
+          --dev.period 3 \
+          --datadir /data \
+          --networkid 19515 \
+          --http \
+          --http.addr 0.0.0.0 \
+          --http.port 8545 \
+          --http.vhosts '*' \
+          --http.api eth,net,web3,debug,txpool,admin,miner \
+          --http.corsdomain '*' \
+          --ws \
+          --ws.addr 0.0.0.0 \
+          --ws.port 8546 \
+          --ws.origins '*' \
+          --ws.api eth,net,web3,debug,txpool,admin,miner \
+          --nodiscover \
+          --miner.pending.feeRecipient 0x$$ACCOUNT_ADDRESS \
+          --password /data/password.txt \
+          --maxpeers 0
