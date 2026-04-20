@@ -1,0 +1,21 @@
+[
+  {
+    "title": "Smart Energy Chain",
+    "url": "https://secexplorer.io/",
+    "group": "Mainnets",
+    "icon": "https://raw.githubusercontent.com/secblockchain/assets/main/sec-logo.png"
+  },
+  {
+    "title": "Smart Energy Chain",
+    "url": "https://testnet.secexplorer.io/",
+    "group": "Testnets",
+    "icon": "https://raw.githubusercontent.com/secblockchain/assets/main/sec-logo.png"
+  },
+  {
+    "title": "Smart Energy Chain",
+    "url": "https://devnet.secexplorer.io/",
+    "group": "Other",
+    "icon": "https://raw.githubusercontent.com/secblockchain/assets/main/sec-logo.png",
+    "isActive": true
+  }
+]
