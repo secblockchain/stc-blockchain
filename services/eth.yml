@@ -9,6 +9,7 @@ services:
     container_name: eth
     volumes:
       - ./genesis.json:/genesis.json
+      - ../volumes/geth/:/data/
     ports:
       - "8545:8545"
       - "8546:8546"
@@ -18,7 +19,6 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        mkdir -p /data
         printf '%s\n' "$$ACCOUNT_PASSWORD" | tr -d '\r' > /data/password.txt
         PK=$$(printf '%s' "$$ACCOUNT_PRIVATE_KEY" | tr -d ' \t\r\n' | sed 's/^0[xX]//')
         PK_LEN=$$(printf '%s' "$$PK" | wc -c | tr -d ' ')

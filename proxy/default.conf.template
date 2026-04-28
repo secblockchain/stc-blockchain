@@ -13,6 +13,9 @@ server {
     server_name  devnet.secexplorer.io;
     proxy_http_version 1.1;
 
+    proxy_hide_header Content-Security-Policy;
+    proxy_hide_header Content-Security-Policy-Report-Only;
+
     proxy_buffering on;
     proxy_buffer_size 16k;
     proxy_busy_buffers_size 24k;
@@ -45,6 +48,7 @@ server {
         proxy_set_header      Upgrade "$http_upgrade";
         proxy_set_header      Connection $connection_upgrade;
         proxy_cache_bypass    $http_upgrade;
+        add_header Content-Security-Policy "connect-src 'self' https: wss:;" always;
     }
 }
 
