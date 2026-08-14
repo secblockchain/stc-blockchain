@@ -10,7 +10,7 @@ server {
 
     ssl_certificate /etc/backendssl/backend.pem;
     ssl_certificate_key /etc/backendssl/backend.key;
-    server_name  devnet.secexplorer.io;
+    server_name  devnet.${DOMAIN};
     proxy_http_version 1.1;
 
     proxy_hide_header Content-Security-Policy;
@@ -58,13 +58,13 @@ server {
 
     ssl_certificate /etc/statsssl/stats.pem;
     ssl_certificate_key /etc/statsssl/stats.key;
-    server_name  devnet-stats.secexplorer.io;
+    server_name  devnet-stats.${DOMAIN};
     proxy_http_version 1.1;
     proxy_hide_header Access-Control-Allow-Origin;
     proxy_hide_header Access-Control-Allow-Credentials;
     proxy_hide_header Access-Control-Allow-Methods;
     proxy_hide_header Access-Control-Allow-Headers;
-    add_header 'Access-Control-Allow-Origin' 'https://devnet.secexplorer.io' always;
+    add_header 'Access-Control-Allow-Origin' 'https://devnet.${DOMAIN}' always;
     add_header 'Access-Control-Allow-Credentials' 'true' always;
     add_header 'Access-Control-Allow-Methods' 'PUT, GET, POST, OPTIONS, DELETE, PATCH' always;
     add_header 'Access-Control-Allow-Headers' 'DNT,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,x-csrf-token' always;
@@ -82,7 +82,7 @@ server {
         proxy_set_header      X-Forwarded-Proto "$scheme";
         proxy_cache_bypass    $http_upgrade;
         if ($request_method = 'OPTIONS') {
-            add_header 'Access-Control-Allow-Origin' 'https://devnet.secexplorer.io' always;
+            add_header 'Access-Control-Allow-Origin' 'https://devnet.${DOMAIN}' always;
             add_header 'Access-Control-Allow-Credentials' 'true' always;
             add_header 'Access-Control-Allow-Methods' 'PUT, GET, POST, OPTIONS, DELETE, PATCH' always;
             add_header 'Access-Control-Allow-Headers' 'DNT,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,x-csrf-token' always;
@@ -100,13 +100,13 @@ server {
 
     ssl_certificate /etc/visualizessl/visual.pem;
     ssl_certificate_key /etc/visualizessl/visual.key;
-    server_name  devnet-visual.secexplorer.io;
+    server_name  devnet-visual.${DOMAIN};
     proxy_http_version 1.1;
     proxy_hide_header Access-Control-Allow-Origin;
     proxy_hide_header Access-Control-Allow-Credentials;
     proxy_hide_header Access-Control-Allow-Methods;
     proxy_hide_header Access-Control-Allow-Headers;
-    add_header 'Access-Control-Allow-Origin' 'https://devnet.secexplorer.io' always;
+    add_header 'Access-Control-Allow-Origin' 'https://devnet.${DOMAIN}' always;
     add_header 'Access-Control-Allow-Credentials' 'true' always;
     add_header 'Access-Control-Allow-Methods' 'PUT, GET, POST, OPTIONS, DELETE, PATCH' always;
     add_header 'Access-Control-Allow-Headers' 'DNT,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,x-csrf-token' always;
@@ -124,7 +124,7 @@ server {
         proxy_set_header      X-Forwarded-Proto "$scheme";
         proxy_cache_bypass    $http_upgrade;
         if ($request_method = 'OPTIONS') {
-            add_header 'Access-Control-Allow-Origin' 'https://devnet.secexplorer.io' always;
+            add_header 'Access-Control-Allow-Origin' 'https://devnet.${DOMAIN}' always;
             add_header 'Access-Control-Allow-Credentials' 'true' always;
             add_header 'Access-Control-Allow-Methods' 'PUT, GET, POST, OPTIONS, DELETE, PATCH' always;
             add_header 'Access-Control-Allow-Headers' 'DNT,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,x-csrf-token' always;
@@ -142,7 +142,7 @@ server {
 
     ssl_certificate /etc/rpcssl/rpc.pem;
     ssl_certificate_key /etc/rpcssl/rpc.key;
-    server_name  devnet-rpc.secexplorer.io;
+    server_name  devnet-rpc.${DOMAIN};
     proxy_http_version 1.1;
 
     # JSON-RPC HTTP

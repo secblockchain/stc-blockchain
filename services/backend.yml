@@ -14,6 +14,8 @@ services:
       - 4000:4000
     env_file:
       -  ../envs/common-blockscout.env
+    environment:
+      BLOCKSCOUT_HOST: devnet.${DOMAIN:?DOMAIN is required}
     volumes:
       - ../volumes/logs/:/app/logs/
       - ../volumes/dets/:/app/dets/

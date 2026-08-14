@@ -14,6 +14,7 @@ services:
       - "../SSL/visualize:/etc/visualizessl"
       - "../SSL/rpc:/etc/rpcssl"
     environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required}
       BACK_PROXY_PASS: ${BACK_PROXY_PASS:-http://backend:4000}
       FRONT_PROXY_PASS: ${FRONT_PROXY_PASS:-http://frontend:3000}
     ports:

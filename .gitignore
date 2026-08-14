@@ -2,3 +2,4 @@ volumes/
 SSL/
 
 .env
+secrets/

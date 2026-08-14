@@ -28,6 +28,21 @@ To stop everything:
 docker compose down
 ```
 
+## Ethereum Mainnet full node using this Geth source
+
+To build `services/go-ethereum` from this repository and run it as an Ethereum Mainnet execution client with Lighthouse, use the standalone configuration:
+
+```bash
+mkdir -p secrets
+openssl rand -hex 32 > secrets/jwt.hex
+chmod 600 secrets/jwt.hex
+docker compose -f ethereum-mainnet-full-node.yml build --pull geth
+docker compose -f ethereum-mainnet-full-node.yml pull lighthouse
+docker compose -f ethereum-mainnet-full-node.yml up -d
+```
+
+This starts only `geth` and `lighthouse`; it does not start Blockscout or the other application services. See `ETHEREUM_5_VPS_DEPLOYMENT.md` for the complete five-VPS procedure.
+
 ## What runs (default `docker-compose.yml`)
 
 Core services:
