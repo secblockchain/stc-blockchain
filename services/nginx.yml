@@ -15,6 +15,9 @@ services:
       - "../SSL/rpc:/etc/rpcssl"
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN is required}
+      STATS_DOMAIN: ${STATS_DOMAIN:?STATS_DOMAIN is required}
+      VISUAL_DOMAIN: ${VISUAL_DOMAIN:?VISUAL_DOMAIN is required}
+      RPC_DOMAIN: ${RPC_DOMAIN:?RPC_DOMAIN is required}
       BACK_PROXY_PASS: ${BACK_PROXY_PASS:-http://backend:4000}
       FRONT_PROXY_PASS: ${FRONT_PROXY_PASS:-http://frontend:3000}
     ports:

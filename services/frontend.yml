@@ -12,9 +12,9 @@ services:
     env_file:
       -  ../envs/common-frontend.env
     environment:
-      NEXT_PUBLIC_API_HOST: devnet.${DOMAIN:?DOMAIN is required}
-      NEXT_PUBLIC_STATS_API_HOST: https://devnet-stats.${DOMAIN:?DOMAIN is required}
-      NEXT_PUBLIC_NETWORK_RPC_URL: https://devnet-rpc.${DOMAIN:?DOMAIN is required}
-      NEXT_PUBLIC_APP_HOST: devnet.${DOMAIN:?DOMAIN is required}
-      NEXT_PUBLIC_VISUALIZE_API_HOST: https://devnet-visual.${DOMAIN:?DOMAIN is required}
-      NEXT_PUBLIC_FEATURED_NETWORKS: https://devnet.${DOMAIN:?DOMAIN is required}/featured_networks.json
+      NEXT_PUBLIC_API_HOST: ${DOMAIN:?DOMAIN is required}
+      NEXT_PUBLIC_STATS_API_HOST: https://${STATS_DOMAIN:?STATS_DOMAIN is required}
+      NEXT_PUBLIC_NETWORK_RPC_URL: https://${RPC_DOMAIN:?RPC_DOMAIN is required}
+      NEXT_PUBLIC_APP_HOST: ${DOMAIN:?DOMAIN is required}
+      NEXT_PUBLIC_VISUALIZE_API_HOST: https://${VISUAL_DOMAIN:?VISUAL_DOMAIN is required}
+      NEXT_PUBLIC_FEATURED_NETWORKS: https://${DOMAIN:?DOMAIN is required}/featured_networks.json

@@ -3,3 +3,4 @@ SSL/
 
 .env
 secrets/
+static/featured_networks.json
