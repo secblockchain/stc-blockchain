@@ -5,6 +5,8 @@
 #   git config --global core.excludesfile ~/.gitignore_global
 
 /tmp
+/node-data/
+/genesis.json
 */**/*un~
 */**/*.test
 *un~
