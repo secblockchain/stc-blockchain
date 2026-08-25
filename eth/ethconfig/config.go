@@ -66,7 +66,9 @@ var Defaults = Config{
 	RPCGasCap:          50000000,
 	RPCEVMTimeout:      5 * time.Second,
 	GPO:                FullNodeGPO,
-	RPCTxFeeCap:        1, // 1 ether
+	// Allow at least a fixed 2 SEP transfer fee (21000 * InitialBaseFee), with
+	// headroom for higher-gas contract calls.
+	RPCTxFeeCap: 100, // 100 ether/SEP
 }
 
 //go:generate go run github.com/fjl/gencodec -type Config -formats toml -out gen_config.go
