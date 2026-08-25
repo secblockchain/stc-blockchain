@@ -105,7 +105,8 @@ func TestBlockGasLimits(t *testing.T) {
 	}
 }
 
-// TestCalcBaseFee assumes all blocks are 1559-blocks
+// TestCalcBaseFee assumes all blocks are 1559-blocks.
+// This fork keeps a fixed base fee regardless of parent gas usage.
 func TestCalcBaseFee(t *testing.T) {
 	tests := []struct {
 		parentBaseFee   int64
@@ -114,8 +115,8 @@ func TestCalcBaseFee(t *testing.T) {
 		expectedBaseFee int64
 	}{
 		{params.InitialBaseFee, 20000000, 10000000, params.InitialBaseFee}, // usage == target
-		{params.InitialBaseFee, 20000000, 9000000, 987500000},              // usage below target
-		{params.InitialBaseFee, 20000000, 11000000, 1012500000},            // usage above target
+		{params.InitialBaseFee, 20000000, 9000000, params.InitialBaseFee},  // usage below target
+		{params.InitialBaseFee, 20000000, 11000000, params.InitialBaseFee}, // usage above target
 	}
 	for i, test := range tests {
 		parent := &types.Header{
