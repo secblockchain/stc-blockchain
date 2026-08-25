@@ -52,6 +52,7 @@ func VerifyEIP1559Header(config *params.ChainConfig, parent, header *types.Heade
 }
 
 // CalcBaseFee calculates the basefee of the header.
+// This fork uses a fixed base fee so a 21000-gas transfer always costs 2 SEP.
 func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
-	return new(big.Int).Div(new(big.Int).SetUint64(params.TransferBaseFee), new(big.Int).SetUint64(params.TxGas))
+	return new(big.Int).SetUint64(params.InitialBaseFee)
 }
