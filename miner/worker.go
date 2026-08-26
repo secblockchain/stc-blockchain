@@ -26,6 +26,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/beacon"
+	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
@@ -1002,10 +1004,27 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 		log.Error("Failed to prepare header for sealing", "err", err)
 		return nil, err
 	}
+	// Clique clears header.Coinbase for voting. Import validation credits tips to
+	// Author(header) (the seal signer), not header.Coinbase. Force the sealing
+	// fee recipient to the authorized signer so tipped txs cannot produce a
+	// state-root mismatch when --miner.etherbase differs from --unlock.
+	//
+	// The live engine is beacon.Beacon wrapping Clique (see ethconfig.CreateConsensusEngine),
+	// so unwrap before type-asserting — a direct *clique.Clique assert never matches.
+	feeRecipient := genParams.coinbase
+	if cli := cliqueSigner(w.engine); cli != nil {
+		if signer := cli.Signer(); signer != (common.Address{}) {
+			if feeRecipient != (common.Address{}) && feeRecipient != signer {
+				log.Warn("Clique etherbase differs from signer; using signer for tx tips",
+					"etherbase", feeRecipient, "signer", signer)
+			}
+			feeRecipient = signer
+		}
+	}
 	// Could potentially happen if starting to mine in an odd state.
-	// Note genParams.coinbase can be different with header.Coinbase
-	// since clique algorithm can modify the coinbase field in header.
-	env, err := w.makeEnv(parent, header, genParams.coinbase)
+	// Note feeRecipient can differ from header.Coinbase under Clique
+	// (header.Coinbase is reserved for signer votes).
+	env, err := w.makeEnv(parent, header, feeRecipient)
 	if err != nil {
 		log.Error("Failed to create sealing context", "err", err)
 		return nil, err
@@ -1275,4 +1294,17 @@ func signalToErr(signal int32) error {
 	default:
 		panic(fmt.Errorf("undefined signal %d", signal))
 	}
+}
+
+// cliqueSigner returns the inner Clique engine, unwrapping beacon.Beacon when needed.
+func cliqueSigner(engine consensus.Engine) *clique.Clique {
+	if c, ok := engine.(*clique.Clique); ok {
+		return c
+	}
+	if b, ok := engine.(*beacon.Beacon); ok {
+		if c, ok := b.InnerEngine().(*clique.Clique); ok {
+			return c
+		}
+	}
+	return nil
 }

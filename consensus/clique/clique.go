@@ -610,6 +610,15 @@ func (c *Clique) Authorize(signer common.Address, signFn SignerFn) {
 	c.signFn = signFn
 }
 
+// Signer returns the address authorized to seal blocks, or empty if unset.
+// Block tips must be credited to this address so sealing matches import
+// validation (which uses ecrecover of the seal as the fee recipient).
+func (c *Clique) Signer() common.Address {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	return c.signer
+}
+
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
 func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
