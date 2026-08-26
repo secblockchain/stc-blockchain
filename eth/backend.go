@@ -406,12 +406,32 @@ func (s *Ethereum) shouldPreserve(header *types.Header) bool {
 }
 
 // SetEtherbase sets the mining reward address.
+// For Clique, also re-authorize the consensus signer to the same address so
+// sealing tips and seal Author stay aligned (avoids tipped-tx state root splits).
 func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 	s.lock.Lock()
 	s.etherbase = etherbase
 	s.lock.Unlock()
 
 	s.miner.SetEtherbase(etherbase)
+
+	var cli *clique.Clique
+	if c, ok := s.engine.(*clique.Clique); ok {
+		cli = c
+	} else if cl, ok := s.engine.(*beacon.Beacon); ok {
+		if c, ok := cl.InnerEngine().(*clique.Clique); ok {
+			cli = c
+		}
+	}
+	if cli == nil {
+		return
+	}
+	wallet, err := s.accountManager.Find(accounts.Account{Address: etherbase})
+	if wallet == nil || err != nil {
+		log.Error("Cannot re-authorize Clique signer for new etherbase", "etherbase", etherbase, "err", err)
+		return
+	}
+	cli.Authorize(etherbase, wallet.SignData)
 }
 
 // StartMining starts the miner with the given number of CPU threads. If mining
