@@ -17,6 +17,8 @@
 package vm
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -95,16 +97,17 @@ var PrecompiledContractsBerlin = map[common.Address]PrecompiledContract{
 // PrecompiledContractsCancun contains the default set of pre-compiled Ethereum
 // contracts used in the Cancun release.
 var PrecompiledContractsCancun = map[common.Address]PrecompiledContract{
-	common.BytesToAddress([]byte{1}):    &ecrecover{},
-	common.BytesToAddress([]byte{2}):    &sha256hash{},
-	common.BytesToAddress([]byte{3}):    &ripemd160hash{},
-	common.BytesToAddress([]byte{4}):    &dataCopy{},
-	common.BytesToAddress([]byte{5}):    &bigModExp{eip2565: true},
-	common.BytesToAddress([]byte{6}):    &bn256AddIstanbul{},
-	common.BytesToAddress([]byte{7}):    &bn256ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{8}):    &bn256PairingIstanbul{},
-	common.BytesToAddress([]byte{9}):    &blake2F{},
-	common.BytesToAddress([]byte{0x0a}): &kzgPointEvaluation{},
+	common.BytesToAddress([]byte{1}):          &ecrecover{},
+	common.BytesToAddress([]byte{2}):          &sha256hash{},
+	common.BytesToAddress([]byte{3}):          &ripemd160hash{},
+	common.BytesToAddress([]byte{4}):          &dataCopy{},
+	common.BytesToAddress([]byte{5}):          &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{6}):          &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{7}):          &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{8}):          &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{9}):          &blake2F{},
+	common.BytesToAddress([]byte{0x0a}):       &kzgPointEvaluation{},
+	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{}, // EIP-7951 (Osaka) forward-port
 }
 
 // PrecompiledContractsBLS contains the set of pre-compiled Ethereum
@@ -1133,4 +1136,46 @@ func kZGToVersionedHash(kzg kzg4844.Commitment) common.Hash {
 	h[0] = blobCommitmentVersionKZG
 
 	return h
+}
+
+// p256Verify implements the secp256r1 (P-256) signature verification
+// precompile from EIP-7951 / RIP-7212, forward-ported from Osaka to this
+// fork's Cancun set. Input is exactly 160 bytes:
+// hash(32) || r(32) || s(32) || qx(32) || qy(32).
+// A valid signature returns 32 bytes ending in 0x01; any invalid or
+// malformed input returns empty output. Verification failure is never an
+// execution error.
+type p256Verify struct{}
+
+// RequiredGas returns the gas required to execute the precompile.
+func (c *p256Verify) RequiredGas(input []byte) uint64 {
+	return params.P256VerifyGas
+}
+
+// Run executes the P-256 signature verification.
+func (c *p256Verify) Run(input []byte) ([]byte, error) {
+	if len(input) != 160 {
+		return nil, nil
+	}
+	var (
+		hash  = input[0:32]
+		r     = new(big.Int).SetBytes(input[32:64])
+		s     = new(big.Int).SetBytes(input[64:96])
+		x     = new(big.Int).SetBytes(input[96:128])
+		y     = new(big.Int).SetBytes(input[128:160])
+		curve = elliptic.P256()
+	)
+	// Component range checks per the EIP: 0 < r, s < n.
+	if n := curve.Params().N; r.Sign() <= 0 || s.Sign() <= 0 || r.Cmp(n) >= 0 || s.Cmp(n) >= 0 {
+		return nil, nil
+	}
+	// IsOnCurve rejects coordinates outside [0, p) and the point at infinity.
+	if !curve.IsOnCurve(x, y) {
+		return nil, nil
+	}
+	pub := &ecdsa.PublicKey{Curve: curve, X: x, Y: y}
+	if ecdsa.Verify(pub, hash, r, s) {
+		return common.LeftPadBytes([]byte{1}, 32), nil
+	}
+	return nil, nil
 }
