@@ -60,6 +60,14 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 	}
 	if header.Difficulty.Cmp(common.Big0) == 0 {
 		random = &header.MixDigest
+	} else if header.MixDigest == (common.Hash{}) {
+		// Clique (PoA) headers carry difficulty 1/2 with an all-zero mix
+		// digest. Upstream geth gates the post-merge EVM rule sets (Shanghai,
+		// Cancun) on Random being set, which would leave PUSH0/MCOPY/TSTORE
+		// unavailable on this chain forever. Treat these blocks as merged for
+		// rule selection; PREVRANDAO consequently returns the zero mix digest,
+		// which is fine on a chain with no randomness beacon.
+		random = &header.MixDigest
 	}
 	return vm.BlockContext{
 		CanTransfer: CanTransfer,

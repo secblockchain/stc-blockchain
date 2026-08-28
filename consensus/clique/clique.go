@@ -299,24 +299,45 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	if header.GasLimit > params.MaxGasLimit {
 		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
 	}
+	// This fork enables Shanghai under clique for its EVM features (PUSH0 &co).
+	// There is no beacon chain to produce withdrawals, so every post-Shanghai
+	// block must commit to an empty withdrawals list.
 	if chain.Config().IsShanghai(header.Number, header.Time) {
-		return errors.New("clique does not support shanghai fork")
-	}
-	// Verify the non-existence of withdrawalsHash.
-	if header.WithdrawalsHash != nil {
+		if header.WithdrawalsHash == nil {
+			return errors.New("missing withdrawalsHash")
+		}
+		if *header.WithdrawalsHash != types.EmptyWithdrawalsHash {
+			return fmt.Errorf("invalid withdrawalsHash: have %x, expected %x (withdrawals are not supported)", *header.WithdrawalsHash, types.EmptyWithdrawalsHash)
+		}
+	} else if header.WithdrawalsHash != nil {
 		return fmt.Errorf("invalid withdrawalsHash: have %x, expected nil", header.WithdrawalsHash)
 	}
+	// Cancun is likewise enabled for its EVM features (MCOPY, TSTORE/TLOAD,
+	// EIP-6780). Blob transactions have no data-availability layer on this
+	// chain, so the blob gas fields must stay zero, and with no beacon chain
+	// the parent beacon root must stay unset.
 	if chain.Config().IsCancun(header.Number, header.Time) {
-		return errors.New("clique does not support cancun fork")
-	}
-	// Verify the non-existence of cancun-specific header fields
-	switch {
-	case header.ExcessBlobGas != nil:
-		return fmt.Errorf("invalid excessBlobGas: have %d, expected nil", header.ExcessBlobGas)
-	case header.BlobGasUsed != nil:
-		return fmt.Errorf("invalid blobGasUsed: have %d, expected nil", header.BlobGasUsed)
-	case header.ParentBeaconRoot != nil:
-		return fmt.Errorf("invalid parentBeaconRoot, have %#x, expected nil", header.ParentBeaconRoot)
+		switch {
+		case header.ExcessBlobGas == nil:
+			return errors.New("missing excessBlobGas")
+		case header.BlobGasUsed == nil:
+			return errors.New("missing blobGasUsed")
+		case *header.ExcessBlobGas != 0:
+			return fmt.Errorf("invalid excessBlobGas: have %d, expected 0 (blob transactions are not supported)", *header.ExcessBlobGas)
+		case *header.BlobGasUsed != 0:
+			return fmt.Errorf("invalid blobGasUsed: have %d, expected 0 (blob transactions are not supported)", *header.BlobGasUsed)
+		case header.ParentBeaconRoot != nil:
+			return fmt.Errorf("invalid parentBeaconRoot, have %#x, expected nil", header.ParentBeaconRoot)
+		}
+	} else {
+		switch {
+		case header.ExcessBlobGas != nil:
+			return fmt.Errorf("invalid excessBlobGas: have %d, expected nil", header.ExcessBlobGas)
+		case header.BlobGasUsed != nil:
+			return fmt.Errorf("invalid blobGasUsed: have %d, expected nil", header.BlobGasUsed)
+		case header.ParentBeaconRoot != nil:
+			return fmt.Errorf("invalid parentBeaconRoot, have %#x, expected nil", header.ParentBeaconRoot)
+		}
 	}
 	// All basic checks passed, verify cascading fields
 	return c.verifyCascadingFields(chain, header, parents)
@@ -596,6 +617,12 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 	// Assign the final state root to header.
 	header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
 
+	// Post-Shanghai blocks must carry an (empty) withdrawals list so the body
+	// stays consistent with the header's withdrawals hash enforced in
+	// verifyHeader.
+	if chain.Config().IsShanghai(header.Number, header.Time) {
+		return types.NewBlockWithWithdrawals(header, txs, nil, receipts, []*types.Withdrawal{}, trie.NewStackTrie(nil)), nil
+	}
 	// Assemble and return the final block for sealing.
 	return types.NewBlock(header, txs, nil, receipts, trie.NewStackTrie(nil)), nil
 }
@@ -772,14 +799,16 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 	if header.BaseFee != nil {
 		enc = append(enc, header.BaseFee)
 	}
+	// Post-Shanghai/Cancun header fields are part of the signed payload. The
+	// append order mirrors the canonical header RLP field order.
 	if header.WithdrawalsHash != nil {
-		panic("unexpected withdrawal hash value in clique")
-	}
-	if header.ExcessBlobGas != nil {
-		panic("unexpected excess blob gas value in clique")
+		enc = append(enc, header.WithdrawalsHash)
 	}
 	if header.BlobGasUsed != nil {
-		panic("unexpected blob gas used value in clique")
+		enc = append(enc, header.BlobGasUsed)
+	}
+	if header.ExcessBlobGas != nil {
+		enc = append(enc, header.ExcessBlobGas)
 	}
 	if header.ParentBeaconRoot != nil {
 		panic("unexpected parent beacon root value in clique")

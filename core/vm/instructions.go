@@ -86,6 +86,14 @@ func opNot(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte
 	return nil, nil
 }
 
+// opClz implements the CLZ opcode (EIP-7939): count of leading zero bits of
+// the 256-bit operand; CLZ(0) = 256.
+func opClz(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	x := scope.Stack.peek()
+	x.SetUint64(uint64(256 - x.BitLen()))
+	return nil, nil
+}
+
 func opLt(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y := scope.Stack.pop(), scope.Stack.peek()
 	if x.Lt(y) {

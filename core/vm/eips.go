@@ -102,6 +102,17 @@ func enable1344(jt *JumpTable) {
 	}
 }
 
+// enable7939 applies EIP-7939 (CLZ opcode), forward-ported from Osaka so that
+// bytecode compiled with current tooling defaults runs on this chain.
+func enable7939(jt *JumpTable) {
+	jt[CLZ] = &operation{
+		execute:     opClz,
+		constantGas: GasFastStep,
+		minStack:    minStack(1, 1),
+		maxStack:    maxStack(1, 1),
+	}
+}
+
 // opChainID implements CHAINID opcode
 func opChainID(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	chainId, _ := uint256.FromBig(interpreter.evm.chainConfig.ChainID)
