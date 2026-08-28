@@ -69,8 +69,12 @@ func ValidateTransaction(tx *types.Transaction, head *types.Header, signer types
 	if !opts.Config.IsLondon(head.Number) && tx.Type() == types.DynamicFeeTxType {
 		return fmt.Errorf("%w: type %d rejected, pool not yet in London", core.ErrTxTypeNotSupported, tx.Type())
 	}
-	if !opts.Config.IsCancun(head.Number, head.Time) && tx.Type() == types.BlobTxType {
-		return fmt.Errorf("%w: type %d rejected, pool not yet in Cancun", core.ErrTxTypeNotSupported, tx.Type())
+	if tx.Type() == types.BlobTxType {
+		// This chain has no beacon chain to provide data availability for
+		// blob sidecars, so blob transactions are permanently disabled even
+		// after Cancun (which is enabled for its EVM features only). Blocks
+		// with a non-zero blobGasUsed are rejected in consensus as well.
+		return fmt.Errorf("%w: type %d rejected, blob transactions are not supported on this chain", core.ErrTxTypeNotSupported, tx.Type())
 	}
 	// Check whether the init code size has been exceeded
 	if opts.Config.IsShanghai(head.Number, head.Time) && tx.To() == nil && len(tx.Data()) > params.MaxInitCodeSize {
