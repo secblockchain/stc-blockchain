@@ -69,7 +69,7 @@ func (t PrettyAge) String() string {
 	result, prec := "", 0
 
 	for _, unit := range ageUnits {
-		if diff > unit.Size {
+		if diff >= unit.Size {
 			result = fmt.Sprintf("%s%d%s", result, diff/unit.Size, unit.Symbol)
 			diff %= unit.Size
 
@@ -79,4 +79,14 @@ func (t PrettyAge) String() string {
 		}
 	}
 	return result
+}
+
+func FormatMilliTime(n int64) string {
+	if n < 0 {
+		return "invalid"
+	}
+	if n == 0 {
+		return ""
+	}
+	return time.UnixMilli(n).Format("2006-01-02 15:04:05.000")
 }

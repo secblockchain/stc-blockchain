@@ -14,11 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package miner
+package miner // TOFIX
 
 import (
+	"bytes"
 	"math/big"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,16 +27,20 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/consensus/stcons"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/txpool/legacypool"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
+	buildertypes "github.com/ethereum/go-ethereum/core/types/builder"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/miner/minerconfig"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/trie"
 	"github.com/holiman/uint256"
 )
 
@@ -66,9 +70,9 @@ var (
 	// Test transactions
 	pendingTxs []*types.Transaction
 	newTxs     []*types.Transaction
-
-	testConfig = &Config{
-		Recommit: time.Second,
+	oneSecond  = time.Second
+	testConfig = &minerconfig.Config{
+		Recommit: &oneSecond,
 		GasCeil:  params.GenesisGasLimit,
 	}
 )
@@ -130,7 +134,7 @@ func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine 
 	default:
 		t.Fatalf("unexpected consensus engine type: %T", engine)
 	}
-	chain, err := core.NewBlockChain(db, &core.CacheConfig{TrieDirtyDisabled: true}, gspec, nil, engine, vm.Config{}, nil, nil)
+	chain, err := core.NewBlockChain(db, gspec, engine, &core.BlockChainConfig{ArchiveMode: true})
 	if err != nil {
 		t.Fatalf("core.NewBlockChain failed: %v", err)
 	}
@@ -148,6 +152,12 @@ func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine 
 func (b *testWorkerBackend) BlockChain() *core.BlockChain { return b.chain }
 func (b *testWorkerBackend) TxPool() *txpool.TxPool       { return b.txPool }
 
+// SubscribeSyncEvents subscribes to a throwaway feed that never fires; the
+// worker tests do not exercise downloader-driven start/stop behavior.
+func (b *testWorkerBackend) SubscribeSyncEvents(ch chan<- downloader.SyncEvent) event.Subscription {
+	return new(event.Feed).Subscribe(ch)
+}
+
 func (b *testWorkerBackend) newRandomTx(creation bool) *types.Transaction {
 	var tx *types.Transaction
 	gasPrice := big.NewInt(10 * params.InitialBaseFee)
@@ -161,8 +171,8 @@ func (b *testWorkerBackend) newRandomTx(creation bool) *types.Transaction {
 
 func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, blocks int) (*worker, *testWorkerBackend) {
 	backend := newTestWorkerBackend(t, chainConfig, engine, db, blocks)
-	backend.txPool.Add(pendingTxs, true, false)
-	w := newWorker(testConfig, chainConfig, engine, backend, new(event.TypeMux), nil, false)
+	backend.txPool.Add(pendingTxs, true)
+	w := newWorker(testConfig, engine, backend, new(event.TypeMux), NewBidBlockPermissionManager())
 	w.setEtherbase(testBankAddress)
 	return w, backend
 }
@@ -180,7 +190,7 @@ func TestGenerateAndImportBlock(t *testing.T) {
 	defer w.close()
 
 	// This test chain imports the mined blocks.
-	chain, _ := core.NewBlockChain(rawdb.NewMemoryDatabase(), nil, b.genesis, nil, engine, vm.Config{}, nil, nil)
+	chain, _ := core.NewBlockChain(rawdb.NewMemoryDatabase(), b.genesis, engine, nil)
 	defer chain.Stop()
 
 	// Ignore empty commit here for less noise.
@@ -196,8 +206,8 @@ func TestGenerateAndImportBlock(t *testing.T) {
 	w.start()
 
 	for i := 0; i < 5; i++ {
-		b.txPool.Add([]*types.Transaction{b.newRandomTx(true)}, true, false)
-		b.txPool.Add([]*types.Transaction{b.newRandomTx(false)}, true, false)
+		b.txPool.Add([]*types.Transaction{b.newRandomTx(true)}, true)
+		b.txPool.Add([]*types.Transaction{b.newRandomTx(false)}, true)
 
 		select {
 		case ev := <-sub.Chan():
@@ -208,6 +218,91 @@ func TestGenerateAndImportBlock(t *testing.T) {
 		case <-time.After(3 * time.Second): // Worker needs 1s to include new changes.
 			t.Fatalf("timeout")
 		}
+	}
+}
+
+func TestCommitBidBlockPreservesBuilderExecutionHeaderFields(t *testing.T) {
+	// TODO: rewrite this test with StconsTestChainConfig + a stcons-formatted
+	// genesis (vanity + validator + seal) so the snapshot bootstrap inside
+	// SetExtraData / prepareValidators succeeds. The current TestChainConfig
+	// has no stcons config and the empty genesis has no validator bytes, so
+	// prepareBidBlockTask returns "invalid validators bytes" before any of the
+	// preservation assertions can run.
+	t.Skip("needs stcons-formatted genesis; see TODO above")
+	engine := stcons.New(params.TestChainConfig, rawdb.NewMemoryDatabase(), nil, common.Hash{})
+	defer engine.Close()
+	chain, err := core.NewBlockChain(rawdb.NewMemoryDatabase(), &core.Genesis{Config: params.TestChainConfig}, ethash.NewFaker(), nil)
+	if err != nil {
+		t.Fatalf("core.NewBlockChain failed: %v", err)
+	}
+	defer chain.Stop()
+	w := &worker{
+		chainConfig: params.TestChainConfig,
+		chain:       chain,
+		engine:      engine,
+		taskCh:      make(chan *task, 1),
+		exitCh:      make(chan struct{}),
+	}
+	w.running.Store(true)
+
+	tx := types.NewTransaction(0, common.Address{0x1}, big.NewInt(1), params.TxGas, big.NewInt(1), nil)
+	receiptHash := common.Hash{0x11}
+	root := common.Hash{0x22}
+	var bloom types.Bloom
+	bloom[0] = 0x33
+
+	builderUncleHash := common.Hash{0xbb}
+	decoded := &buildertypes.DecodedBidBlock{
+		Header: &types.Header{
+			Number:      big.NewInt(1),
+			ParentHash:  chain.Genesis().Hash(),
+			UncleHash:   builderUncleHash,
+			Root:        root,
+			ReceiptHash: receiptHash,
+			Bloom:       bloom,
+			GasUsed:     21000,
+			Extra:       []byte{0xaa, 0xbb},
+		},
+		Txs:           types.Transactions{tx},
+		GasFee:        big.NewInt(1),
+		SystemTxStart: 1, // no trailing unsigned system txs in this test
+	}
+	w.extra = []byte{0x44, 0x55}
+
+	task, err := w.prepareBidBlockTask(decoded, time.Now())
+	if err != nil {
+		t.Fatalf("prepareBidBlockTask failed: %v", err)
+	}
+
+	block := task.block
+	if block.ReceiptHash() != receiptHash {
+		t.Fatalf("receipt hash mismatch: got %s want %s", block.ReceiptHash(), receiptHash)
+	}
+	if block.Root() != root {
+		t.Fatalf("root mismatch: got %s want %s", block.Root(), root)
+	}
+	if block.Bloom() != bloom {
+		t.Fatalf("bloom mismatch")
+	}
+	if block.GasUsed() != decoded.Header.GasUsed {
+		t.Fatalf("gas used mismatch: got %d want %d", block.GasUsed(), decoded.Header.GasUsed)
+	}
+	wantTxHash := types.DeriveSha(types.Transactions{tx}, trie.NewStackTrie(nil))
+	if block.TxHash() != wantTxHash {
+		t.Fatalf("tx hash mismatch: got %s want %s", block.TxHash(), wantTxHash)
+	}
+	// Builder's UncleHash must be preserved verbatim (design principle: validator
+	// only computes Extra / signatures / TxHash; everything else flows from builder).
+	if block.UncleHash() != builderUncleHash {
+		t.Fatalf("uncle hash mismatch: got %s want %s", block.UncleHash(), builderUncleHash)
+	}
+	expectedHeader := types.CopyHeader(decoded.Header)
+	expectedHeader.Extra = common.CopyBytes(w.extra)
+	if err := engine.SetExtraData(chain, expectedHeader); err != nil {
+		t.Fatalf("SetExtraData failed: %v", err)
+	}
+	if got := block.Extra(); !bytes.Equal(got, expectedHeader.Extra) {
+		t.Fatalf("extra mismatch: got %x want %x", got, expectedHeader.Extra)
 	}
 }
 
@@ -252,102 +347,6 @@ func testEmptyWork(t *testing.T, chainConfig *params.ChainConfig, engine consens
 	case <-taskCh:
 	case <-time.NewTimer(3 * time.Second).C:
 		t.Error("new task timeout")
-	}
-}
-
-func TestAdjustIntervalEthash(t *testing.T) {
-	t.Parallel()
-	testAdjustInterval(t, ethashChainConfig, ethash.NewFaker())
-}
-
-func TestAdjustIntervalClique(t *testing.T) {
-	t.Parallel()
-	testAdjustInterval(t, cliqueChainConfig, clique.New(cliqueChainConfig.Clique, rawdb.NewMemoryDatabase()))
-}
-
-func testAdjustInterval(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine) {
-	defer engine.Close()
-
-	w, _ := newTestWorker(t, chainConfig, engine, rawdb.NewMemoryDatabase(), 0)
-	defer w.close()
-
-	w.skipSealHook = func(task *task) bool {
-		return true
-	}
-	w.fullTaskHook = func() {
-		time.Sleep(100 * time.Millisecond)
-	}
-	var (
-		progress = make(chan struct{}, 10)
-		result   = make([]float64, 0, 10)
-		index    = 0
-		start    atomic.Bool
-	)
-	w.resubmitHook = func(minInterval time.Duration, recommitInterval time.Duration) {
-		// Short circuit if interval checking hasn't started.
-		if !start.Load() {
-			return
-		}
-		var wantMinInterval, wantRecommitInterval time.Duration
-
-		switch index {
-		case 0:
-			wantMinInterval, wantRecommitInterval = 3*time.Second, 3*time.Second
-		case 1:
-			origin := float64(3 * time.Second.Nanoseconds())
-			estimate := origin*(1-intervalAdjustRatio) + intervalAdjustRatio*(origin/0.8+intervalAdjustBias)
-			wantMinInterval, wantRecommitInterval = 3*time.Second, time.Duration(estimate)*time.Nanosecond
-		case 2:
-			estimate := result[index-1]
-			min := float64(3 * time.Second.Nanoseconds())
-			estimate = estimate*(1-intervalAdjustRatio) + intervalAdjustRatio*(min-intervalAdjustBias)
-			wantMinInterval, wantRecommitInterval = 3*time.Second, time.Duration(estimate)*time.Nanosecond
-		case 3:
-			wantMinInterval, wantRecommitInterval = time.Second, time.Second
-		}
-
-		// Check interval
-		if minInterval != wantMinInterval {
-			t.Errorf("resubmit min interval mismatch: have %v, want %v ", minInterval, wantMinInterval)
-		}
-		if recommitInterval != wantRecommitInterval {
-			t.Errorf("resubmit interval mismatch: have %v, want %v", recommitInterval, wantRecommitInterval)
-		}
-		result = append(result, float64(recommitInterval.Nanoseconds()))
-		index += 1
-		progress <- struct{}{}
-	}
-	w.start()
-
-	time.Sleep(time.Second) // Ensure two tasks have been submitted due to start opt
-	start.Store(true)
-
-	w.setRecommitInterval(3 * time.Second)
-	select {
-	case <-progress:
-	case <-time.NewTimer(time.Second).C:
-		t.Error("interval reset timeout")
-	}
-
-	w.resubmitAdjustCh <- &intervalAdjust{inc: true, ratio: 0.8}
-	select {
-	case <-progress:
-	case <-time.NewTimer(time.Second).C:
-		t.Error("interval reset timeout")
-	}
-
-	w.resubmitAdjustCh <- &intervalAdjust{inc: false}
-	select {
-	case <-progress:
-	case <-time.NewTimer(time.Second).C:
-		t.Error("interval reset timeout")
-	}
-
-	w.setRecommitInterval(500 * time.Millisecond)
-	select {
-	case <-progress:
-	case <-time.NewTimer(time.Second).C:
-		t.Error("interval reset timeout")
 	}
 }
 

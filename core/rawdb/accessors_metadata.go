@@ -27,6 +27,11 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
+// FreezerType enumerator
+const (
+	EntireFreezerType uint64 = iota // classic ancient type
+)
+
 // ReadDatabaseVersion retrieves the version number of the database.
 func ReadDatabaseVersion(db ethdb.KeyValueReader) *uint64 {
 	var version uint64
@@ -172,18 +177,5 @@ func UpdateUncleanShutdownMarker(db ethdb.KeyValueStore) {
 	data, _ := rlp.EncodeToBytes(uncleanShutdowns)
 	if err := db.Put(uncleanShutdownKey, data); err != nil {
 		log.Warn("Failed to write unclean-shutdown marker", "err", err)
-	}
-}
-
-// ReadTransitionStatus retrieves the eth2 transition status from the database
-func ReadTransitionStatus(db ethdb.KeyValueReader) []byte {
-	data, _ := db.Get(transitionStatusKey)
-	return data
-}
-
-// WriteTransitionStatus stores the eth2 transition status to the database
-func WriteTransitionStatus(db ethdb.KeyValueWriter, data []byte) {
-	if err := db.Put(transitionStatusKey, data); err != nil {
-		log.Crit("Failed to store the eth2 transition status", "err", err)
 	}
 }

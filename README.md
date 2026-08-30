@@ -100,4 +100,3 @@ transport before doing so! Hackers on the internet are actively trying to subver
 Ethereum nodes with exposed APIs! Further, all browser tabs can access locally
 running web servers, so malicious web pages could try to subvert locally available
 APIs!**
-

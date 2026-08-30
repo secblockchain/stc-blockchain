@@ -90,6 +90,23 @@ type Config struct {
 	// Deprecated: USB monitoring is disabled by default and must be enabled explicitly.
 	NoUSB bool `toml:",omitempty"`
 
+	// DirectBroadcast enable directly broadcast mined block to all peers
+	DirectBroadcast bool `toml:",omitempty"`
+
+	// EnableEVNFeatures enables the direct broadcast feature and disables the transaction broadcast feature.
+	// Used mainly for validators or sentry nodes, which can be recognized by the StakHub contract.
+	// Note: EVN = Enhanced Validator Network, Validator and sentry nodes need to set this flag to true.
+	EnableEVNFeatures bool `toml:",omitempty"`
+
+	// DisableSnapProtocol disable the snap protocol
+	DisableSnapProtocol bool `toml:",omitempty"`
+
+	// EnableQuickBlockFetching indicates whether to fetch new blocks using new messages.
+	EnableQuickBlockFetching bool `toml:",omitempty"`
+
+	// RangeLimit enable 5000 blocks limit when handle range query
+	RangeLimit bool `toml:",omitempty"`
+
 	// USB enables hardware wallet monitoring and connectivity.
 	USB bool `toml:",omitempty"`
 
@@ -176,6 +193,10 @@ type Config struct {
 	// private APIs to untrusted users is a major security risk.
 	WSExposeAll bool `toml:",omitempty"`
 
+	// WSMessageSizeLimit specifies the maximum size in bytes for a single WebSocket message.
+	// If this field is zero, the default message size limit will be used.
+	WSMessageSizeLimit int64 `toml:",omitempty"`
+
 	// GraphQLCors is the Cross-Origin Resource Sharing header to send to requesting
 	// clients. Please be aware that CORS is a browser enforced security, it's fully
 	// useless for custom HTTP clients.
@@ -191,12 +212,29 @@ type Config struct {
 	GraphQLVirtualHosts []string `toml:",omitempty"`
 
 	// Logger is a custom logger to use with the p2p.Server.
-	Logger log.Logger `toml:",omitempty"`
+	Logger log.Logger `toml:"-,omitempty"`
 
-	oldGethResourceWarning bool
+	LogConfig *LogConfig `toml:",omitempty"`
 
 	// AllowUnprotectedTxs allows non EIP-155 protected transactions to be send over RPC.
 	AllowUnprotectedTxs bool `toml:",omitempty"`
+
+	// EnableDoubleSignMonitor is a flag that whether to enable the double signature checker
+	EnableDoubleSignMonitor bool `toml:",omitempty"`
+
+	// EnableMaliciousVoteMonitor is a flag that whether to enable the malicious vote checker
+	EnableMaliciousVoteMonitor bool `toml:",omitempty"`
+
+	// BLSPasswordFile is the file that contains BLS wallet password.
+	BLSPasswordFile string `toml:",omitempty"`
+
+	// BLSWalletDir is the file system folder of BLS wallet. The directory can
+	// be specified as a relative path, in which case it is resolved relative to the
+	// current directory.
+	BLSWalletDir string `toml:",omitempty"`
+
+	// VoteJournalDir is the directory to store votes in the fast finality feature.
+	VoteJournalDir string `toml:",omitempty"`
 
 	// BatchRequestLimit is the maximum number of requests in a batch.
 	BatchRequestLimit int `toml:",omitempty"`
@@ -210,7 +248,31 @@ type Config struct {
 	// EnablePersonal enables the deprecated personal namespace.
 	EnablePersonal bool `toml:"-"`
 
+	// Configures database engine used by the node.
 	DBEngine string `toml:",omitempty"`
+
+	Instance int `toml:",omitempty"`
+
+	// Configures OpenTelemetry reporting.
+	OpenTelemetry OpenTelemetryConfig `toml:",omitempty"`
+
+	oldGethResourceWarning bool
+}
+
+// OpenTelemetryConfig has settings for
+type OpenTelemetryConfig struct {
+	Enabled bool `toml:",omitempty"`
+
+	Tags       string `toml:",omitempty"`
+	InstanceID string `toml:",omitempty"`
+
+	// Exporter endpoint.
+	Endpoint     string `toml:",omitempty"`
+	AuthUser     string `toml:",omitempty"`
+	AuthPassword string `toml:",omitempty"`
+
+	// Percentage of sampled traces.
+	SampleRatio float64 `toml:",omitempty"`
 }
 
 // IPCEndpoint resolves an IPC endpoint based on a configured value, taking into
@@ -477,4 +539,18 @@ func (c *Config) GetKeyStoreDir() (string, bool, error) {
 	}
 
 	return keydir, isEphemeral, nil
+}
+
+type LogConfig struct {
+	FileRoot     *string `toml:",omitempty"`
+	FilePath     *string `toml:",omitempty"`
+	MaxBytesSize *uint   `toml:",omitempty"`
+	Level        *string `toml:",omitempty"`
+	RotateHours  *uint   `toml:",omitempty"`
+	MaxBackups   *uint   `toml:",omitempty"`
+
+	// TermTimeFormat is the time format used for console logging.
+	TermTimeFormat *string `toml:",omitempty"`
+	// TimeFormat is the time format used for file logging.
+	TimeFormat *string `toml:",omitempty"`
 }

@@ -27,10 +27,10 @@ import (
 
 // insertStats tracks and reports on block insertion.
 type insertStats struct {
-	queued, processed, ignored int
-	usedGas                    uint64
-	lastIndex                  int
-	startTime                  mclock.AbsTime
+	processed, ignored int
+	usedGas            uint64
+	lastIndex          int
+	startTime          mclock.AbsTime
 }
 
 // statsReportLimit is the time limit during import and export after which we
@@ -39,27 +39,32 @@ const statsReportLimit = 8 * time.Second
 
 // report prints statistics if some number of blocks have been processed
 // or more than a few seconds have passed since the last message.
-func (st *insertStats) report(chain []*types.Block, index int, snapDiffItems, snapBufItems, trieDiffNodes, triebufNodes common.StorageSize, setHead bool) {
+func (st *insertStats) report(chain []*types.Block, index int, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes common.StorageSize, setHead bool) {
 	// Fetch the timings for the batch
 	var (
 		now     = mclock.Now()
-		elapsed = now.Sub(st.startTime)
+		elapsed = now.Sub(st.startTime) + 1 // prevent zero division
+		mgasps  = float64(st.usedGas) * 1000 / float64(elapsed)
 	)
 	// If we're at the last block of the batch or report period reached, log
 	if index == len(chain)-1 || elapsed >= statsReportLimit {
 		// Count the number of transactions in this segment
-		var txs int
+		var txs, blobs int
 		for _, block := range chain[st.lastIndex : index+1] {
 			txs += len(block.Transactions())
+			for _, sidecar := range block.Sidecars() {
+				blobs += len(sidecar.Blobs)
+			}
 		}
 		end := chain[index]
 
 		// Assemble the log context and send it to the logger
 		context := []interface{}{
-			"number", end.Number(), "hash", end.Hash(),
-			"blocks", st.processed, "txs", txs, "mgas", float64(st.usedGas) / 1000000,
-			"elapsed", common.PrettyDuration(elapsed), "mgasps", float64(st.usedGas) * 1000 / float64(elapsed),
+			"number", end.Number(), "hash", end.Hash(), "miner", end.Coinbase(),
+			"blocks", st.processed, "txs", txs, "blobs", blobs, "mgas", float64(st.usedGas) / 1000000,
+			"elapsed", common.PrettyDuration(elapsed), "mgasps", mgasps,
 		}
+		blockInsertMgaspsGauge.Update(int64(mgasps))
 		if timestamp := time.Unix(int64(end.Time()), 0); time.Since(timestamp) > time.Minute {
 			context = append(context, []interface{}{"age", common.PrettyAge(timestamp)}...)
 		}
@@ -72,11 +77,8 @@ func (st *insertStats) report(chain []*types.Block, index int, snapDiffItems, sn
 		if trieDiffNodes != 0 { // pathdb
 			context = append(context, []interface{}{"triediffs", trieDiffNodes}...)
 		}
-		context = append(context, []interface{}{"triedirty", triebufNodes}...)
+		context = append(context, []interface{}{"triedirty", trieBufNodes}...)
 
-		if st.queued > 0 {
-			context = append(context, []interface{}{"queued", st.queued}...)
-		}
 		if st.ignored > 0 {
 			context = append(context, []interface{}{"ignored", st.ignored}...)
 		}
@@ -133,27 +135,6 @@ func (it *insertIterator) next() (*types.Block, error) {
 	return it.chain[it.index], it.validator.ValidateBody(it.chain[it.index])
 }
 
-// peek returns the next block in the iterator, along with any potential validation
-// error for that block, but does **not** advance the iterator.
-//
-// Both header and body validation errors (nil too) is cached into the iterator
-// to avoid duplicating work on the following next() call.
-func (it *insertIterator) peek() (*types.Block, error) {
-	// If we reached the end of the chain, abort
-	if it.index+1 >= len(it.chain) {
-		return nil, nil
-	}
-	// Wait for verification result if not yet done
-	if len(it.errors) <= it.index+1 {
-		it.errors = append(it.errors, <-it.results)
-	}
-	if it.errors[it.index+1] != nil {
-		return it.chain[it.index+1], it.errors[it.index+1]
-	}
-	// Block header valid, ignore body validation since we don't have a parent anyway
-	return it.chain[it.index+1], nil
-}
-
 // previous returns the previous header that was being processed, or nil.
 func (it *insertIterator) previous() *types.Header {
 	if it.index < 1 {
@@ -170,7 +151,7 @@ func (it *insertIterator) current() *types.Header {
 	return it.chain[it.index].Header()
 }
 
-// first returns the first block in the it.
+// first returns the first block in it.
 func (it *insertIterator) first() *types.Block {
 	return it.chain[0]
 }
@@ -178,9 +159,4 @@ func (it *insertIterator) first() *types.Block {
 // remaining returns the number of remaining blocks.
 func (it *insertIterator) remaining() int {
 	return len(it.chain) - it.index
-}
-
-// processed returns the number of processed blocks.
-func (it *insertIterator) processed() int {
-	return it.index + 1
 }
