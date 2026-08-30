@@ -78,8 +78,10 @@ type Config struct {
 
 // DefaultConfig contains default settings for miner.
 var DefaultConfig = Config{
-	GasCeil:  defaultGasCeil,
-	GasPrice: big.NewInt(params.GWei / 20),
+	GasCeil: defaultGasCeil,
+	// Minimum tip / gas price so a plain transfer (TxGas) costs ~2 SEP on Stcons
+	// (baseFee is 0; the tip is paid to validators via SystemAddress).
+	GasPrice: big.NewInt(params.MinimumGasPriceSTC),
 	// The default recommit time is chosen as two seconds since
 	// consensus-layer usually will wait a half slot of time(6s)
 	// for payload generation. It should be enough for Geth to
