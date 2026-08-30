@@ -1,26 +1,26 @@
 ---
 name: Report a bug
-about: Something with STC geth client is not working as expected
+about: Something with go-ethereum is not working as expected
 title: ''
 labels: 'type:bug'
 assignees: ''
 ---
 
 #### System information
+
 Geth version: `geth version`
+CL client & version: e.g. lighthouse/nimbus/prysm@v1.0.0
 OS & Version: Windows/Linux/OSX
 Commit hash : (if `develop`)
-Arguments:
 
-#### Description
-- Steps to reproduce the behaviour
-...
+#### Expected behaviour
 
-- Expected behaviour
-...
 
-- Actual behaviour
-...
+#### Actual behaviour
+
+
+#### Steps to reproduce the behaviour
+
 
 #### Backtrace
 
