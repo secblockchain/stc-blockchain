@@ -205,6 +205,29 @@ func TestServerDial(t *testing.T) {
 	}
 }
 
+func TestServerStopTimeout(t *testing.T) {
+	srv := &Server{Config: Config{
+		PrivateKey:  newkey(),
+		MaxPeers:    1,
+		NoDiscovery: true,
+		Logger:      testlog.Logger(t, log.LvlTrace).New("server", "1"),
+	}}
+	srv.Start()
+	srv.loopWG.Add(1)
+
+	stopChan := make(chan struct{})
+	go func() {
+		srv.Stop()
+		close(stopChan)
+	}()
+
+	select {
+	case <-stopChan:
+	case <-time.After(defaultDialTimeout + 1*time.Second):
+		t.Error("server should be shutdown in defaultDialTimeout + 1 seconds")
+	}
+}
+
 // This test checks that RemovePeer disconnects the peer if it is connected.
 func TestServerRemovePeerDisconnect(t *testing.T) {
 	srv1 := &Server{Config: Config{
@@ -410,11 +433,11 @@ func TestServerSetupConn(t *testing.T) {
 			wantCloseErr: DiscUnexpectedIdentity,
 		},
 		{
-			tt:           &setupTransport{pubkey: clientpub, protoHandshakeErr: errProtoHandshakeError},
+			tt:           &setupTransport{pubkey: clientpub, protoHandshakeErr: DiscTooManyPeers},
 			dialDest:     enode.NewV4(clientpub, nil, 0, 0),
 			flags:        dynDialedConn,
 			wantCalls:    "doEncHandshake,doProtoHandshake,close,",
-			wantCloseErr: errProtoHandshakeError,
+			wantCloseErr: DiscTooManyPeers,
 		},
 		{
 			tt:           &setupTransport{pubkey: srvpub, phs: protoHandshake{ID: crypto.FromECDSAPub(srvpub)[1:]}},
@@ -577,6 +600,33 @@ func TestServerInboundThrottle(t *testing.T) {
 	case <-time.After(timeout):
 		t.Error("connection not closed within timeout")
 	}
+}
+
+func TestServerDiscoveryV5FailureRollsBackV4(t *testing.T) {
+	badBootstrap := enode.NewV4(&newkey().PublicKey, net.ParseIP("127.0.0.1"), 30303, 0) // invalid V5 of a V4 node
+	srv := &Server{
+		Config: Config{
+			PrivateKey:       newkey(),
+			ListenAddr:       "",
+			DiscAddr:         "127.0.0.1:0",
+			MaxPeers:         5,
+			DiscoveryV4:      true,
+			DiscoveryV5:      true,
+			BootstrapNodesV5: []*enode.Node{badBootstrap},
+			Logger:           testlog.Logger(t, log.LvlTrace),
+		},
+	}
+	err := srv.Start()
+	if err == nil {
+		t.Fatal("expected discovery v5 startup failure")
+	}
+	if !strings.Contains(err.Error(), "bad bootstrap node") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if srv.DiscoveryV4() != nil {
+		t.Fatal("discovery v4 not cleaned after failure")
+	}
+	srv.Stop()
 }
 
 func listenFakeAddr(network, laddr string, remoteAddr net.Addr) (net.Listener, error) {

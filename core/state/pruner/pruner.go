@@ -73,15 +73,16 @@ type Config struct {
 // periodically in order to release the disk usage and improve the
 // disk read performance to some extent.
 type Pruner struct {
-	config      Config
-	chainHeader *types.Header
-	db          ethdb.Database
-	stateBloom  *stateBloom
-	snaptree    *snapshot.Tree
+	config        Config
+	chainHeader   *types.Header
+	db            ethdb.Database
+	stateBloom    *stateBloom
+	snaptree      *snapshot.Tree
+	triesInMemory uint64
 }
 
 // NewPruner creates the pruner instance.
-func NewPruner(db ethdb.Database, config Config) (*Pruner, error) {
+func NewPruner(db ethdb.Database, config Config, triesInMemory uint64) (*Pruner, error) {
 	headBlock := rawdb.ReadHeadBlock(db)
 	if headBlock == nil {
 		return nil, errors.New("failed to load head block")
@@ -95,7 +96,7 @@ func NewPruner(db ethdb.Database, config Config) (*Pruner, error) {
 		NoBuild:    true,
 		AsyncBuild: false,
 	}
-	snaptree, err := snapshot.New(snapconfig, db, triedb, headBlock.Root())
+	snaptree, err := snapshot.New(snapconfig, db, triedb, headBlock.Root(), int(triesInMemory), false)
 	if err != nil {
 		return nil, err // The relevant snapshot(s) might not exist
 	}
@@ -109,11 +110,12 @@ func NewPruner(db ethdb.Database, config Config) (*Pruner, error) {
 		return nil, err
 	}
 	return &Pruner{
-		config:      config,
-		chainHeader: headBlock.Header(),
-		db:          db,
-		stateBloom:  stateBloom,
-		snaptree:    snaptree,
+		config:        config,
+		chainHeader:   headBlock.Header(),
+		db:            db,
+		stateBloom:    stateBloom,
+		snaptree:      snaptree,
+		triesInMemory: triesInMemory,
 	}, nil
 }
 
@@ -160,11 +162,8 @@ func prune(snaptree *snapshot.Tree, root common.Hash, maindb ethdb.Database, sta
 
 			var eta time.Duration // Realistically will never remain uninited
 			if done := binary.BigEndian.Uint64(key[:8]); done > 0 {
-				var (
-					left  = math.MaxUint64 - binary.BigEndian.Uint64(key[:8])
-					speed = done/uint64(time.Since(pstart)/time.Millisecond+1) + 1 // +1s to avoid division by zero
-				)
-				eta = time.Duration(left/speed) * time.Millisecond
+				left := math.MaxUint64 - binary.BigEndian.Uint64(key[:8])
+				eta = common.CalculateETA(done, left, time.Since(pstart))
 			}
 			if time.Since(logged) > 8*time.Second {
 				log.Info("Pruning state data", "nodes", count, "skipped", skipped, "size", size,
@@ -192,8 +191,10 @@ func prune(snaptree *snapshot.Tree, root common.Hash, maindb ethdb.Database, sta
 	// Pruning is done, now drop the "useless" layers from the snapshot.
 	// Firstly, flushing the target layer into the disk. After that all
 	// diff layers below the target will all be merged into the disk.
-	if err := snaptree.Cap(root, 0); err != nil {
-		return err
+	if root != snaptree.DiskRoot() {
+		if err := snaptree.Cap(root, 0); err != nil {
+			return err
+		}
 	}
 	// Secondly, flushing the snapshot journal into the disk. All diff
 	// layers upon are dropped silently. Eventually the entire snapshot
@@ -245,23 +246,23 @@ func (p *Pruner) Prune(root common.Hash) error {
 		return err
 	}
 	if stateBloomRoot != (common.Hash{}) {
-		return RecoverPruning(p.config.Datadir, p.db)
+		return RecoverPruning(p.config.Datadir, p.db, p.triesInMemory)
 	}
-	// If the target state root is not specified, use the HEAD-127 as the
+	// If the target state root is not specified, use the HEAD-(n-1) as the
 	// target. The reason for picking it is:
 	// - in most of the normal cases, the related state is available
 	// - the probability of this layer being reorg is very low
 	var layers []snapshot.Snapshot
 	if root == (common.Hash{}) {
 		// Retrieve all snapshot layers from the current HEAD.
-		// In theory there are 128 difflayers + 1 disk layer present,
-		// so 128 diff layers are expected to be returned.
-		layers = p.snaptree.Snapshots(p.chainHeader.Root, 128, true)
-		if len(layers) != 128 {
-			// Reject if the accumulated diff layers are less than 128. It
+		// In theory there are n difflayers + 1 disk layer present,
+		// so n diff layers are expected to be returned.
+		layers = p.snaptree.Snapshots(p.chainHeader.Root, int(p.triesInMemory), true)
+		if len(layers) != int(p.triesInMemory) {
+			// Reject if the accumulated diff layers are less than n. It
 			// means in most of normal cases, there is no associated state
 			// with bottom-most diff layer.
-			return fmt.Errorf("snapshot not old enough yet: need %d more blocks", 128-len(layers))
+			return fmt.Errorf("snapshot not old enough yet: need %d more blocks", int(p.triesInMemory)-len(layers))
 		}
 		// Use the bottom-most diff layer as the target
 		root = layers[len(layers)-1].Root()
@@ -270,11 +271,10 @@ func (p *Pruner) Prune(root common.Hash) error {
 	// is the presence of root can indicate the presence of the
 	// entire trie.
 	if !rawdb.HasLegacyTrieNode(p.db, root) {
-		// The special case is for clique based networks(goerli
-		// and some other private networks), it's possible that two
-		// consecutive blocks will have same root. In this case snapshot
-		// difflayer won't be created. So HEAD-127 may not paired with
-		// head-127 layer. Instead the paired layer is higher than the
+		// The special case is for clique based networks, it's possible
+		// that two consecutive blocks will have same root. In this case
+		// snapshot difflayer won't be created. So HEAD-127 may not paired
+		// with head-127 layer. Instead the paired layer is higher than the
 		// bottom-most diff layer. Try to find the bottom-most snapshot
 		// layer with state available.
 		//
@@ -288,6 +288,13 @@ func (p *Pruner) Prune(root common.Hash) error {
 				found = true
 				log.Info("Selecting middle-layer as the pruning target", "root", root, "depth", i)
 				break
+			}
+		}
+		if !found {
+			if blob := rawdb.ReadLegacyTrieNode(p.db, p.snaptree.DiskRoot()); len(blob) != 0 {
+				root = p.snaptree.DiskRoot()
+				found = true
+				log.Info("Selecting disk-layer as the pruning target", "root", root)
 			}
 		}
 		if !found {
@@ -340,7 +347,7 @@ func (p *Pruner) Prune(root common.Hash) error {
 // pruning can be resumed. What's more if the bloom filter is constructed, the
 // pruning **has to be resumed**. Otherwise a lot of dangling nodes may be left
 // in the disk.
-func RecoverPruning(datadir string, db ethdb.Database) error {
+func RecoverPruning(datadir string, db ethdb.Database, triesInMemory uint64) error {
 	stateBloomPath, stateBloomRoot, err := findBloomFilter(datadir)
 	if err != nil {
 		return err
@@ -368,7 +375,7 @@ func RecoverPruning(datadir string, db ethdb.Database) error {
 	}
 	// Offline pruning is only supported in legacy hash based scheme.
 	triedb := triedb.NewDatabase(db, triedb.HashDefaults)
-	snaptree, err := snapshot.New(snapconfig, db, triedb, headBlock.Root())
+	snaptree, err := snapshot.New(snapconfig, db, triedb, headBlock.Root(), int(triesInMemory), false)
 	if err != nil {
 		return err // The relevant snapshot(s) might not exist
 	}
@@ -382,7 +389,7 @@ func RecoverPruning(datadir string, db ethdb.Database) error {
 	// otherwise the dangling state will be left.
 	var (
 		found       bool
-		layers      = snaptree.Snapshots(headBlock.Root(), 128, true)
+		layers      = snaptree.Snapshots(headBlock.Root(), int(triesInMemory), true)
 		middleRoots = make(map[common.Hash]struct{})
 	)
 	for _, layer := range layers {

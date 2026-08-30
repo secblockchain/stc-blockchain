@@ -29,21 +29,21 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	lru "github.com/ethereum/go-ethereum/common/lru"
+	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
-	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/crypto/keccak"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/ethereum/go-ethereum/trie"
-	"golang.org/x/crypto/sha3"
 )
 
 const (
@@ -226,7 +226,7 @@ func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*typ
 	abort := make(chan struct{})
 	results := make(chan error, len(headers))
 
-	go func() {
+	gopool.Submit(func() {
 		for i, header := range headers {
 			err := c.verifyHeader(chain, header, headers[:i])
 
@@ -236,7 +236,7 @@ func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*typ
 			case results <- err:
 			}
 		}
-	}()
+	})
 	return abort, results
 }
 
@@ -312,11 +312,13 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	// Verify the non-existence of cancun-specific header fields
 	switch {
 	case header.ExcessBlobGas != nil:
-		return fmt.Errorf("invalid excessBlobGas: have %d, expected nil", header.ExcessBlobGas)
+		return fmt.Errorf("invalid excessBlobGas: have %d, expected nil", *header.ExcessBlobGas)
 	case header.BlobGasUsed != nil:
-		return fmt.Errorf("invalid blobGasUsed: have %d, expected nil", header.BlobGasUsed)
+		return fmt.Errorf("invalid blobGasUsed: have %d, expected nil", *header.BlobGasUsed)
 	case header.ParentBeaconRoot != nil:
-		return fmt.Errorf("invalid parentBeaconRoot, have %#x, expected nil", header.ParentBeaconRoot)
+		return fmt.Errorf("invalid parentBeaconRoot, have %#x, expected nil", *header.ParentBeaconRoot)
+	case header.SlotNumber != nil:
+		return fmt.Errorf("invalid slotNumber, have %#x, expected nil", *header.SlotNumber)
 	}
 	// All basic checks passed, verify cascading fields
 	return c.verifyCascadingFields(chain, header, parents)
@@ -406,7 +408,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		// at a checkpoint block without a parent (light client CHT), or we have piled
 		// up more headers than allowed to be reorged (chain reinit from a freezer),
 		// consider the checkpoint trusted and snapshot it.
-		if number == 0 || (number%c.config.Epoch == 0 && (len(headers) > params.FullImmutabilityThreshold || chain.GetHeaderByNumber(number-1) == nil)) {
+		if number == 0 || (number%c.config.Epoch == 0 && (len(headers) > int(params.FullImmutabilityThreshold) || chain.GetHeaderByNumber(number-1) == nil)) {
 			checkpoint := chain.GetHeaderByNumber(number)
 			if checkpoint != nil {
 				hash := checkpoint.Hash()
@@ -471,6 +473,10 @@ func (c *Clique) VerifyUncles(chain consensus.ChainReader, block *types.Block) e
 	return nil
 }
 
+func (c *Clique) VerifyRequests(header *types.Header, Requests [][]byte) error {
+	return nil
+}
+
 // verifySeal checks whether the signature contained in the header satisfies the
 // consensus protocol requirements. The method accepts an optional list of parent
 // headers that aren't yet part of the local blockchain to generate the snapshots
@@ -508,6 +514,11 @@ func (c *Clique) verifySeal(snap *Snapshot, header *types.Header, parents []*typ
 		}
 	}
 	return nil
+}
+
+// NextInTurnValidator return the next in-turn validator for header
+func (c *Clique) NextInTurnValidator(chain consensus.ChainHeaderReader, header *types.Header) (common.Address, error) {
+	return common.Address{}, errors.New("not implemented")
 }
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
@@ -578,26 +589,12 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	return nil
 }
 
-// Finalize implements consensus.Engine. There is no post-transaction
-// consensus rules in clique, do nothing here.
-func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs []*types.Transaction, uncles []*types.Header, withdrawals []*types.Withdrawal) {
+// Finalize implements consensus.Engine, ensuring no uncles are set, nor block
+// rewards given.
+func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state vm.StateDB, _ *[]*types.Transaction, uncles []*types.Header, withdrawals []*types.Withdrawal,
+	_ *[]*types.Receipt, _ *[]*types.Transaction, _ *uint64, tracer *tracing.Hooks) (err error) {
 	// No block rewards in PoA, so the state remains as is
-}
-
-// FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
-// nor block rewards given, and returns the final block.
-func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt, withdrawals []*types.Withdrawal) (*types.Block, error) {
-	if len(withdrawals) > 0 {
-		return nil, errors.New("clique does not support withdrawals")
-	}
-	// Finalize block
-	c.Finalize(chain, header, state, txs, uncles, nil)
-
-	// Assign the final state root to header.
-	header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
-
-	// Assemble and return the final block for sealing.
-	return types.NewBlock(header, txs, nil, receipts, trie.NewStackTrie(nil)), nil
+	return
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -608,6 +605,10 @@ func (c *Clique) Authorize(signer common.Address, signFn SignerFn) {
 
 	c.signer = signer
 	c.signFn = signFn
+}
+
+func (c *Clique) Delay(chain consensus.ChainReader, header *types.Header, leftOver *time.Duration) *time.Duration {
+	return nil
 }
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
@@ -663,7 +664,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 	// Wait until sealing is terminated or delay timeout.
 	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
-	go func() {
+	gopool.Submit(func() {
 		select {
 		case <-stop:
 			return
@@ -675,7 +676,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		default:
 			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
 		}
-	}()
+	})
 
 	return nil
 }
@@ -712,18 +713,9 @@ func (c *Clique) Close() error {
 	return nil
 }
 
-// APIs implements consensus.Engine, returning the user facing RPC API to allow
-// controlling the signer voting.
-func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
-	return []rpc.API{{
-		Namespace: "clique",
-		Service:   &API{chain: chain, clique: c},
-	}}
-}
-
 // SealHash returns the hash of a block prior to it being sealed.
 func SealHash(header *types.Header) (hash common.Hash) {
-	hasher := sha3.NewLegacyKeccak256()
+	hasher := keccak.NewLegacyKeccak256()
 	encodeSigHeader(hasher, header)
 	hasher.(crypto.KeccakState).Read(hash[:])
 	return hash
@@ -774,6 +766,9 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 	}
 	if header.ParentBeaconRoot != nil {
 		panic("unexpected parent beacon root value in clique")
+	}
+	if header.SlotNumber != nil {
+		panic("unexpected slot number value in clique")
 	}
 	if err := rlp.Encode(w, enc); err != nil {
 		panic("can't encode: " + err.Error())

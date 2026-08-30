@@ -2510,10 +2510,8 @@ var RequestManager = require('./web3/requestmanager');
 var Iban = require('./web3/iban');
 var Eth = require('./web3/methods/eth');
 var DB = require('./web3/methods/db');
-var Shh = require('./web3/methods/shh');
 var Net = require('./web3/methods/net');
 var Personal = require('./web3/methods/personal');
-var Swarm = require('./web3/methods/swarm');
 var Settings = require('./web3/settings');
 var version = require('./version.json');
 var utils = require('./utils/utils');
@@ -2532,10 +2530,8 @@ function Web3 (provider) {
     this.currentProvider = provider;
     this.eth = new Eth(this);
     this.db = new DB(this);
-    this.shh = new Shh(this);
     this.net = new Net(this);
     this.personal = new Personal(this);
-    this.bzz = new Swarm(this);
     this.settings = new Settings();
     this.version = {
         api: version.version
@@ -2612,11 +2608,6 @@ var properties = function () {
             name: 'version.ethereum',
             getter: 'eth_protocolVersion',
             inputFormatter: utils.toDecimal
-        }),
-        new Property({
-            name: 'version.whisper',
-            getter: 'shh_version',
-            inputFormatter: utils.toDecimal
         })
     ];
 };
@@ -2632,7 +2623,7 @@ Web3.prototype.createBatch = function () {
 module.exports = Web3;
 
 
-},{"./utils/sha3":19,"./utils/utils":20,"./version.json":21,"./web3/batch":24,"./web3/extend":28,"./web3/httpprovider":32,"./web3/iban":33,"./web3/ipcprovider":34,"./web3/methods/db":37,"./web3/methods/eth":38,"./web3/methods/net":39,"./web3/methods/personal":40,"./web3/methods/shh":41,"./web3/methods/swarm":42,"./web3/property":45,"./web3/requestmanager":46,"./web3/settings":47,"bignumber.js":"bignumber.js"}],23:[function(require,module,exports){
+},{"./utils/sha3":19,"./utils/utils":20,"./version.json":21,"./web3/batch":24,"./web3/extend":28,"./web3/httpprovider":32,"./web3/iban":33,"./web3/ipcprovider":34,"./web3/methods/db":37,"./web3/methods/eth":38,"./web3/methods/net":39,"./web3/methods/personal":40,"./web3/property":45,"./web3/requestmanager":46,"./web3/settings":47,"bignumber.js":"bignumber.js"}],23:[function(require,module,exports){
 /*
     This file is part of web3.js.
 
@@ -3486,8 +3477,6 @@ var getOptions = function (options, type) {
                 fromBlock: formatters.inputBlockNumberFormatter(options.fromBlock),
                 toBlock: formatters.inputBlockNumberFormatter(options.toBlock)
             };
-        case 'shh':
-            return options;
     }
 };
 
@@ -3734,7 +3723,7 @@ var inputCallFormatter = function (options){
         options.to = inputAddressFormatter(options.to);
     }
 
-    ['maxFeePerGas', 'maxPriorityFeePerGas', 'gasPrice', 'gas', 'value', 'nonce'].filter(function (key) {
+    ['maxFeePerBlobGas', 'maxFeePerGas', 'maxPriorityFeePerGas', 'gasPrice', 'gas', 'value', 'nonce'].filter(function (key) {
         return options[key] !== undefined;
     }).forEach(function(key){
         options[key] = utils.fromDecimal(options[key]);
@@ -3759,7 +3748,7 @@ var inputTransactionFormatter = function (options){
         options.to = inputAddressFormatter(options.to);
     }
 
-    ['maxFeePerGas', 'maxPriorityFeePerGas', 'gasPrice', 'gas', 'value', 'nonce'].filter(function (key) {
+    ['maxFeePerBlobGas', 'maxFeePerGas', 'maxPriorityFeePerGas', 'gasPrice', 'gas', 'value', 'nonce'].filter(function (key) {
         return options[key] !== undefined;
     }).forEach(function(key){
         options[key] = utils.fromDecimal(options[key]);
@@ -3789,6 +3778,9 @@ var outputTransactionFormatter = function (tx){
     if(tx.maxPriorityFeePerGas !== undefined) {
       tx.maxPriorityFeePerGas = utils.toBigNumber(tx.maxPriorityFeePerGas);
     }
+    if(tx.maxFeePerBlobGas !== undefined) {
+      tx.maxFeePerBlobGas = utils.toBigNumber(tx.maxFeePerBlobGas);
+    }
     tx.value = utils.toBigNumber(tx.value);
     return tx;
 };
@@ -3810,6 +3802,12 @@ var outputTransactionReceiptFormatter = function (receipt){
     if(receipt.effectiveGasPrice !== undefined) {
       receipt.effectiveGasPrice = utils.toBigNumber(receipt.effectiveGasPrice);
     }
+    if(receipt.blobGasPrice !== undefined) {
+      receipt.blobGasPrice = utils.toBigNumber(receipt.blobGasPrice);
+    }
+    if(receipt.blobGasUsed !== undefined) {
+      receipt.blobGasUsed = utils.toBigNumber(receipt.blobGasUsed);
+    }
     if(utils.isArray(receipt.logs)) {
         receipt.logs = receipt.logs.map(function(log){
             return outputLogFormatter(log);
@@ -3817,6 +3815,39 @@ var outputTransactionReceiptFormatter = function (receipt){
     }
 
     return receipt;
+};
+
+/**
+ * Formats the output of a transaction original data and receipt to its proper values
+ *
+ * @method outputTransactionDataAndReceiptFormatter
+ * @param {Object} dataAndReceipt
+ * @returns {Object}
+ */
+var outputTransactionDataAndReceiptFormatter = function (dataAndReceipt){
+  if(dataAndReceipt.receipt.blockNumber !== null)
+    dataAndReceipt.receipt.blockNumber = utils.toDecimal(dataAndReceipt.receipt.blockNumber);
+  if(dataAndReceipt.receipt.transactionIndex !== null)
+    dataAndReceipt.receipt.transactionIndex = utils.toDecimal(dataAndReceipt.receipt.transactionIndex);
+  dataAndReceipt.receipt.cumulativeGasUsed = utils.toDecimal(dataAndReceipt.receipt.cumulativeGasUsed);
+  dataAndReceipt.receipt.gasUsed = utils.toDecimal(dataAndReceipt.receipt.gasUsed);
+
+  if(utils.isArray(dataAndReceipt.receipt.logs)) {
+    dataAndReceipt.receipt.logs = dataAndReceipt.receipt.logs.map(function(log){
+      return outputLogFormatter(log);
+    });
+  }
+
+  if(dataAndReceipt.txData.blockNumber !== null)
+    dataAndReceipt.txData.blockNumber = utils.toDecimal(dataAndReceipt.txData.blockNumber);
+  if(dataAndReceipt.txData.transactionIndex !== null)
+    dataAndReceipt.txData.transactionIndex = utils.toDecimal(dataAndReceipt.txData.transactionIndex);
+  dataAndReceipt.txData.nonce = utils.toDecimal(dataAndReceipt.txData.nonce);
+  dataAndReceipt.txData.gas = utils.toDecimal(dataAndReceipt.txData.gas);
+  dataAndReceipt.txData.gasPrice = utils.toBigNumber(dataAndReceipt.txData.gasPrice);
+  dataAndReceipt.txData.value = utils.toBigNumber(dataAndReceipt.txData.value);
+
+  return dataAndReceipt;
 };
 
 /**
@@ -3831,11 +3862,17 @@ var outputBlockFormatter = function(block) {
     if (block.baseFeePerGas !== undefined) {
       block.baseFeePerGas = utils.toBigNumber(block.baseFeePerGas);
     }
+    if (block.blobGasUsed !== undefined) {
+      block.blobGasUsed = utils.toBigNumber(block.blobGasUsed);
+    }
+    if (block.excessBlobGas !== undefined) {
+      block.excessBlobGas = utils.toBigNumber(block.excessBlobGas);
+    }
     block.gasLimit = utils.toDecimal(block.gasLimit);
     block.gasUsed = utils.toDecimal(block.gasUsed);
     block.size = utils.toDecimal(block.size);
     block.timestamp = utils.toDecimal(block.timestamp);
-    if(block.number !== null)
+    if (block.number !== null)
         block.number = utils.toDecimal(block.number);
 
     block.difficulty = utils.toBigNumber(block.difficulty);
@@ -3963,6 +4000,7 @@ var outputSyncingFormatter = function(result) {
     result.healingBytecode = utils.toDecimal(result.healingBytecode);
     result.txIndexFinishedBlocks = utils.toDecimal(result.txIndexFinishedBlocks);
     result.txIndexRemainingBlocks = utils.toDecimal(result.txIndexRemainingBlocks);
+    result.stateIndexRemaining = utils.toDecimal(result.stateIndexRemaining)
 
     return result;
 };
@@ -3977,6 +4015,7 @@ module.exports = {
     outputBigNumberFormatter: outputBigNumberFormatter,
     outputTransactionFormatter: outputTransactionFormatter,
     outputTransactionReceiptFormatter: outputTransactionReceiptFormatter,
+    outputTransactionDataAndReceiptFormatter: outputTransactionDataAndReceiptFormatter,
     outputBlockFormatter: outputBlockFormatter,
     outputLogFormatter: outputLogFormatter,
     outputPostFormatter: outputPostFormatter,
@@ -5363,6 +5402,27 @@ var methods = function () {
         outputFormatter: formatters.outputTransactionFormatter
     });
 
+    var getTransactionDataAndReceipt = new Method({
+      name: 'getTransactionDataAndReceipt',
+      call: 'eth_getTransactionDataAndReceipt',
+      params: 1,
+      outputFormatter: formatters.outputTransactionDataAndReceiptFormatter
+    });
+
+    var getTransactionsByBlockNumber = new Method({
+      name: 'getTransactionsByBlockNumber',
+      call: 'eth_getTransactionsByBlockNumber',
+      params: 1,
+      outputFormatter: formatters.outputTransactionFormatter
+    });
+
+    var getTransactionReceiptsByBlockNumber = new Method({
+      name: 'getTransactionReceiptsByBlockNumber',
+      call: 'eth_getTransactionReceiptsByBlockNumber',
+      params: 1,
+      outputFormatter: formatters.outputTransactionReceiptFormatter
+    });
+
     var getTransactionReceipt = new Method({
         name: 'getTransactionReceipt',
         call: 'eth_getTransactionReceipt',
@@ -5382,6 +5442,13 @@ var methods = function () {
         name: 'sendRawTransaction',
         call: 'eth_sendRawTransaction',
         params: 1,
+        inputFormatter: [null]
+    });
+
+    var sendRawTransactionConditional = new Method({
+        name: 'sendRawTransactionConditional',
+        call: 'eth_sendRawTransactionConditional',
+        params: 2,
         inputFormatter: [null]
     });
 
@@ -5421,36 +5488,6 @@ var methods = function () {
         outputFormatter: utils.toDecimal
     });
 
-    var compileSolidity = new Method({
-        name: 'compile.solidity',
-        call: 'eth_compileSolidity',
-        params: 1
-    });
-
-    var compileLLL = new Method({
-        name: 'compile.lll',
-        call: 'eth_compileLLL',
-        params: 1
-    });
-
-    var compileSerpent = new Method({
-        name: 'compile.serpent',
-        call: 'eth_compileSerpent',
-        params: 1
-    });
-
-    var submitWork = new Method({
-        name: 'submitWork',
-        call: 'eth_submitWork',
-        params: 3
-    });
-
-    var getWork = new Method({
-        name: 'getWork',
-        call: 'eth_getWork',
-        params: 0
-    });
-
     return [
         getBalance,
         getStorageAt,
@@ -5462,19 +5499,18 @@ var methods = function () {
         getBlockUncleCount,
         getTransaction,
         getTransactionFromBlock,
+        getTransactionsByBlockNumber,
+        getTransactionReceiptsByBlockNumber,
+        getTransactionDataAndReceipt,
         getTransactionReceipt,
         getTransactionCount,
         call,
         estimateGas,
         sendRawTransaction,
+        sendRawTransactionConditional,
         signTransaction,
         sendTransaction,
-        sign,
-        compileSolidity,
-        compileLLL,
-        compileSerpent,
-        submitWork,
-        getWork
+        sign
     ];
 };
 
@@ -5502,6 +5538,11 @@ var properties = function () {
         new Property({
             name: 'gasPrice',
             getter: 'eth_gasPrice',
+            outputFormatter: formatters.outputBigNumberFormatter
+        }),
+        new Property({
+            name: 'blobBaseFee',
+            getter: 'eth_blobBaseFee',
             outputFormatter: formatters.outputBigNumberFormatter
         }),
         new Property({
@@ -5714,300 +5755,7 @@ var properties = function () {
 
 module.exports = Personal;
 
-},{"../formatters":30,"../method":36,"../property":45}],41:[function(require,module,exports){
-/*
-    This file is part of web3.js.
-
-    web3.js is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    web3.js is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
-
-    You should have received a copy of the GNU Lesser General Public License
-    along with web3.js.  If not, see <http://www.gnu.org/licenses/>.
-*/
-/** @file shh.js
- * @authors:
- *   Fabian Vogelsteller <fabian@ethereum.org>
- *   Marek Kotewicz <marek@ethcore.io>
- * @date 2017
- */
-
-var Method = require('../method');
-var Filter = require('../filter');
-var watches = require('./watches');
-
-var Shh = function (web3) {
-    this._requestManager = web3._requestManager;
-
-    var self = this;
-
-    methods().forEach(function(method) {
-        method.attachToObject(self);
-        method.setRequestManager(self._requestManager);
-    });
-};
-
-Shh.prototype.newMessageFilter = function (options, callback, filterCreationErrorCallback) {
-    return new Filter(options, 'shh', this._requestManager, watches.shh(), null, callback, filterCreationErrorCallback);
-};
-
-var methods = function () {
-
-    return [
-        new Method({
-            name: 'version',
-            call: 'shh_version',
-            params: 0
-        }),
-        new Method({
-            name: 'info',
-            call: 'shh_info',
-            params: 0
-        }),
-        new Method({
-            name: 'setMaxMessageSize',
-            call: 'shh_setMaxMessageSize',
-            params: 1
-        }),
-        new Method({
-            name: 'setMinPoW',
-            call: 'shh_setMinPoW',
-            params: 1
-        }),
-        new Method({
-            name: 'markTrustedPeer',
-            call: 'shh_markTrustedPeer',
-            params: 1
-        }),
-        new Method({
-            name: 'newKeyPair',
-            call: 'shh_newKeyPair',
-            params: 0
-        }),
-        new Method({
-            name: 'addPrivateKey',
-            call: 'shh_addPrivateKey',
-            params: 1
-        }),
-        new Method({
-            name: 'deleteKeyPair',
-            call: 'shh_deleteKeyPair',
-            params: 1
-        }),
-        new Method({
-            name: 'hasKeyPair',
-            call: 'shh_hasKeyPair',
-            params: 1
-        }),
-        new Method({
-            name: 'getPublicKey',
-            call: 'shh_getPublicKey',
-            params: 1
-        }),
-        new Method({
-            name: 'getPrivateKey',
-            call: 'shh_getPrivateKey',
-            params: 1
-        }),
-        new Method({
-            name: 'newSymKey',
-            call: 'shh_newSymKey',
-            params: 0
-        }),
-        new Method({
-            name: 'addSymKey',
-            call: 'shh_addSymKey',
-            params: 1
-        }),
-        new Method({
-            name: 'generateSymKeyFromPassword',
-            call: 'shh_generateSymKeyFromPassword',
-            params: 1
-        }),
-        new Method({
-            name: 'hasSymKey',
-            call: 'shh_hasSymKey',
-            params: 1
-        }),
-        new Method({
-            name: 'getSymKey',
-            call: 'shh_getSymKey',
-            params: 1
-        }),
-        new Method({
-            name: 'deleteSymKey',
-            call: 'shh_deleteSymKey',
-            params: 1
-        }),
-
-        // subscribe and unsubscribe missing
-
-        new Method({
-            name: 'post',
-            call: 'shh_post',
-            params: 1,
-            inputFormatter: [null]
-        })
-    ];
-};
-
-module.exports = Shh;
-
-
-},{"../filter":29,"../method":36,"./watches":43}],42:[function(require,module,exports){
-/*
-    This file is part of web3.js.
-
-    web3.js is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    web3.js is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
-
-    You should have received a copy of the GNU Lesser General Public License
-    along with web3.js.  If not, see <http://www.gnu.org/licenses/>.
-*/
-/**
- * @file bzz.js
- * @author Alex Beregszaszi <alex@rtfs.hu>
- * @date 2016
- *
- * Reference: https://github.com/ethereum/go-ethereum/blob/swarm/internal/web3ext/web3ext.go#L33
- */
-
-"use strict";
-
-var Method = require('../method');
-var Property = require('../property');
-
-function Swarm(web3) {
-    this._requestManager = web3._requestManager;
-
-    var self = this;
-
-    methods().forEach(function(method) {
-        method.attachToObject(self);
-        method.setRequestManager(self._requestManager);
-    });
-
-    properties().forEach(function(p) {
-        p.attachToObject(self);
-        p.setRequestManager(self._requestManager);
-    });
-}
-
-var methods = function () {
-    var blockNetworkRead = new Method({
-        name: 'blockNetworkRead',
-        call: 'bzz_blockNetworkRead',
-        params: 1,
-        inputFormatter: [null]
-    });
-
-    var syncEnabled = new Method({
-        name: 'syncEnabled',
-        call: 'bzz_syncEnabled',
-        params: 1,
-        inputFormatter: [null]
-    });
-
-    var swapEnabled = new Method({
-        name: 'swapEnabled',
-        call: 'bzz_swapEnabled',
-        params: 1,
-        inputFormatter: [null]
-    });
-
-    var download = new Method({
-        name: 'download',
-        call: 'bzz_download',
-        params: 2,
-        inputFormatter: [null, null]
-    });
-
-    var upload = new Method({
-        name: 'upload',
-        call: 'bzz_upload',
-        params: 2,
-        inputFormatter: [null, null]
-    });
-
-    var retrieve = new Method({
-        name: 'retrieve',
-        call: 'bzz_retrieve',
-        params: 1,
-        inputFormatter: [null]
-    });
-
-    var store = new Method({
-        name: 'store',
-        call: 'bzz_store',
-        params: 2,
-        inputFormatter: [null, null]
-    });
-
-    var get = new Method({
-        name: 'get',
-        call: 'bzz_get',
-        params: 1,
-        inputFormatter: [null]
-    });
-
-    var put = new Method({
-        name: 'put',
-        call: 'bzz_put',
-        params: 2,
-        inputFormatter: [null, null]
-    });
-
-    var modify = new Method({
-        name: 'modify',
-        call: 'bzz_modify',
-        params: 4,
-        inputFormatter: [null, null, null, null]
-    });
-
-    return [
-        blockNetworkRead,
-        syncEnabled,
-        swapEnabled,
-        download,
-        upload,
-        retrieve,
-        store,
-        get,
-        put,
-        modify
-    ];
-};
-
-var properties = function () {
-    return [
-        new Property({
-            name: 'hive',
-            getter: 'bzz_hive'
-        }),
-        new Property({
-            name: 'info',
-            getter: 'bzz_info'
-        })
-    ];
-};
-
-
-module.exports = Swarm;
-
-},{"../method":36,"../property":45}],43:[function(require,module,exports){
+},{"../formatters":30,"../method":36,"../property":45}],43:[function(require,module,exports){
 /*
     This file is part of web3.js.
 
@@ -6083,36 +5831,8 @@ var eth = function () {
     ];
 };
 
-/// @returns an array of objects describing web3.shh.watch api methods
-var shh = function () {
-
-    return [
-        new Method({
-            name: 'newFilter',
-            call: 'shh_newMessageFilter',
-            params: 1
-        }),
-        new Method({
-            name: 'uninstallFilter',
-            call: 'shh_deleteMessageFilter',
-            params: 1
-        }),
-        new Method({
-            name: 'getLogs',
-            call: 'shh_getFilterMessages',
-            params: 1
-        }),
-        new Method({
-            name: 'poll',
-            call: 'shh_getFilterMessages',
-            params: 1
-        })
-    ];
-};
-
 module.exports = {
-    eth: eth,
-    shh: shh
+    eth: eth
 };
 
 

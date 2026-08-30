@@ -1,0 +1,20 @@
+{
+  "name": "jsutils",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "jsUtils for stc",
+  "main": "index.js",
+  "scripts": {
+    "startMainnet": "node getvalidatorversion.js --Rpc https://rpc.stcexplorer.io --Num 21",
+    "startTestnet": "node getvalidatorversion.js --Rpc https://testnet-rpc.stcexplorer.io --Num 7",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx}\""
+  },
+  "dependencies": {
+    "commander": "^3.0.1",
+    "ethers": "^6.2.3"
+  },
+  "author": "SEP Chain",
+  "devDependencies": {
+    "prettier": "^3.5.3"
+  }
+}

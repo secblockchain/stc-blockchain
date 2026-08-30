@@ -17,6 +17,7 @@
 package core
 
 import (
+	"context"
 	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/core/state"
@@ -31,17 +32,24 @@ type Validator interface {
 	// ValidateBody validates the given block's content.
 	ValidateBody(block *types.Block) error
 
-	// ValidateState validates the given statedb and optionally the receipts and
-	// gas used.
-	ValidateState(block *types.Block, state *state.StateDB, receipts types.Receipts, usedGas uint64) error
+	// ValidateState validates the given statedb and optionally the process result.
+	ValidateState(block *types.Block, state *state.StateDB, res *ProcessResult, stateless bool) error
+}
+
+type TransactionsByPriceAndNonce interface {
+	PeekWithUnwrap() *types.Transaction
+	Shift()
+	Forward(tx *types.Transaction)
 }
 
 // Prefetcher is an interface for pre-caching transaction signatures and state.
 type Prefetcher interface {
 	// Prefetch processes the state changes according to the Ethereum rules by running
 	// the transaction messages using the statedb, but any changes are discarded. The
-	// only goal is to pre-cache transaction signatures and state trie nodes.
-	Prefetch(block *types.Block, statedb *state.StateDB, cfg vm.Config, interrupt *atomic.Bool)
+	// only goal is to warm the state caches.
+	Prefetch(transactions types.Transactions, header *types.Header, gasLimit uint64, statedb *state.StateDB, cfg vm.Config, interrupt *atomic.Bool)
+	// PrefetchMining used for pre-caching transaction signatures and state trie nodes. Only used for mining stage.
+	PrefetchMining(txs TransactionsByPriceAndNonce, header *types.Header, gasLimit uint64, statedb *state.StateDB, cfg vm.Config, interruptCh <-chan struct{}, txCurr *atomic.Pointer[types.Transaction])
 }
 
 // Processor is an interface for processing blocks using a given initial state.
@@ -49,5 +57,13 @@ type Processor interface {
 	// Process processes the state changes according to the Ethereum rules by running
 	// the transaction messages using the statedb and applying any rewards to both
 	// the processor (coinbase) and any included uncles.
-	Process(block *types.Block, statedb *state.StateDB, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error)
+	Process(ctx context.Context, block *types.Block, statedb *state.StateDB, cfg vm.Config) (*ProcessResult, error)
+}
+
+// ProcessResult contains the values computed by Process.
+type ProcessResult struct {
+	Receipts types.Receipts
+	Requests [][]byte
+	Logs     []*types.Log
+	GasUsed  uint64
 }

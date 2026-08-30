@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"errors"
 	"math/big"
 	"time"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/eth/downloader"
+	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -37,7 +37,8 @@ const (
 // syncTransactions starts sending all currently pending transactions to the given peer.
 func (h *handler) syncTransactions(p *eth.Peer) {
 	var hashes []common.Hash
-	for _, batch := range h.txpool.Pending(txpool.PendingFilter{OnlyPlainTxs: true}) {
+	pending, _ := h.txpool.Pending(txpool.PendingFilter{BlobTxs: false})
+	for _, batch := range pending {
 		for _, tx := range batch {
 			hashes = append(hashes, tx.Hash)
 		}
@@ -46,6 +47,15 @@ func (h *handler) syncTransactions(p *eth.Peer) {
 		return
 	}
 	p.AsyncSendPooledTransactionHashes(hashes)
+}
+
+// syncVotes starts sending all currently pending votes to the given peer.
+func (h *handler) syncVotes(p *stcPeer) {
+	votes := h.votepool.GetVotes()
+	if len(votes) == 0 {
+		return
+	}
+	p.AsyncSendVotes(votes)
 }
 
 // chainSyncer coordinates blockchain sync components.
@@ -70,7 +80,7 @@ type chainSyncOp struct {
 func newChainSyncer(handler *handler) *chainSyncer {
 	return &chainSyncer{
 		handler:     handler,
-		peerEventCh: make(chan struct{}),
+		peerEventCh: make(chan struct{}, 10),
 	}
 }
 
@@ -108,18 +118,10 @@ func (cs *chainSyncer) loop() {
 		select {
 		case <-cs.peerEventCh:
 			// Peer information changed, recheck.
-		case err := <-cs.doneCh:
+		case <-cs.doneCh:
 			cs.doneCh = nil
 			cs.force.Reset(forceSyncCycle)
 			cs.forced = false
-
-			// If we've reached the merge transition but no beacon client is available, or
-			// it has not yet switched us over, keep warning the user that their infra is
-			// potentially flaky.
-			if errors.Is(err, downloader.ErrMergeTransition) && time.Since(cs.warned) > 10*time.Second {
-				log.Warn("Local chain is post-merge, waiting for beacon client sync switch-over...")
-				cs.warned = time.Now()
-			}
 		case <-cs.force.C:
 			cs.forced = true
 
@@ -127,7 +129,7 @@ func (cs *chainSyncer) loop() {
 			// Disable all insertion on the blockchain. This needs to happen before
 			// terminating the downloader because the downloader waits for blockchain
 			// inserts, and these can take a long time to finish.
-			cs.handler.chain.StopInsert()
+			cs.handler.chain.InterruptInsert(true)
 			cs.handler.downloader.Terminate()
 			if cs.doneCh != nil {
 				<-cs.doneCh
@@ -141,17 +143,6 @@ func (cs *chainSyncer) loop() {
 func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 	if cs.doneCh != nil {
 		return nil // Sync already running
-	}
-	// If a beacon client once took over control, disable the entire legacy sync
-	// path from here on end. Note, there is a slight "race" between reaching TTD
-	// and the beacon client taking over. The downloader will enforce that nothing
-	// above the first TTD will be delivered to the chain for import.
-	//
-	// An alternative would be to check the local chain for exceeding the TTD and
-	// avoid triggering a sync in that case, but that could also miss sibling or
-	// other family TTD block being accepted.
-	if cs.handler.chain.Config().TerminalTotalDifficultyPassed || cs.handler.merger.TDDReached() {
-		return nil
 	}
 	// Ensure we're at minimum peer count.
 	minPeers := defaultMinSyncPeers
@@ -173,6 +164,11 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 	mode, ourTD := cs.modeAndLocalHead()
 	op := peerToSyncOp(mode, peer)
 	if op.td.Cmp(ourTD) <= 0 {
+		if !cs.handler.acceptTxs.Load() {
+			// Occurs only during a quick restart.
+			cs.handler.acceptTxs.Store(true)
+			log.Info("Enable transaction acceptance for already in sync.")
+		}
 		// We seem to be in sync according to the legacy rules. In the merge
 		// world, it can also mean we're stuck on the merge block, waiting for
 		// a beacon client. In the latter case, notify the user.
@@ -181,7 +177,27 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 			cs.warned = time.Now()
 		}
 		return nil // We're in sync
+		// } else if op.td.Cmp(new(big.Int).Add(ourTD, new(big.Int).SetUint64(10*2))) > 0 {
+		// 	if cs.handler.acceptTxs.Load() && rand.New(rand.NewSource(time.Now().UnixNano())).Int31n(10) < 1 {
+		// 		// There is only a 1/10 probability of disabling transaction acceptance.
+		// 		// This randomness helps protect against attacks where a malicious node falsely claims to have higher blocks.
+		// 		cs.handler.acceptTxs.Store(false)
+		// 		log.Info("Disable transaction acceptance randomly for the delay exceeding 10 blocks.")
+		// 	}
+	} else if op.td.Cmp(new(big.Int).Add(ourTD, common.Big2)) <= 0 { // common.Big2: difficulty of an in-turn block
+		// On STC, blocks are produced much faster than on Ethereum.
+		// If the node is only slightly behind (e.g., 1 block), syncing is unnecessary.
+		// It's likely still processing broadcasted blocks(such as including a big tx) or block hash announcements.
+		// In most cases, the node will catch up within 2 seconds.
+		time.Sleep(2 * time.Second)
+
+		// Re-check local head to see if it has caught up
+		if _, latestTD := cs.modeAndLocalHead(); ourTD.Cmp(latestTD) < 0 {
+			log.Trace("The local head is already caught up; synchronization is not required.")
+			return nil
+		}
 	}
+
 	return op
 }
 
@@ -195,7 +211,7 @@ func (cs *chainSyncer) modeAndLocalHead() (downloader.SyncMode, *big.Int) {
 	if cs.handler.snapSync.Load() {
 		block := cs.handler.chain.CurrentSnapBlock()
 		td := cs.handler.chain.GetTd(block.Hash(), block.Number.Uint64())
-		return downloader.SnapSync, td
+		return ethconfig.SnapSync, td
 	}
 	// We are probably in full sync, but we might have rewound to before the
 	// snap sync pivot, check if we should re-enable snap sync.
@@ -204,21 +220,21 @@ func (cs *chainSyncer) modeAndLocalHead() (downloader.SyncMode, *big.Int) {
 		if head.Number.Uint64() < *pivot {
 			block := cs.handler.chain.CurrentSnapBlock()
 			td := cs.handler.chain.GetTd(block.Hash(), block.Number.Uint64())
-			return downloader.SnapSync, td
+			return ethconfig.SnapSync, td
 		}
 	}
 	// We are in a full sync, but the associated head state is missing. To complete
 	// the head state, forcefully rerun the snap sync. Note it doesn't mean the
 	// persistent state is corrupted, just mismatch with the head block.
-	if !cs.handler.chain.HasState(head.Root) {
+	if !cs.handler.chain.NoTries() && !cs.handler.chain.HasState(head.Root) {
 		block := cs.handler.chain.CurrentSnapBlock()
 		td := cs.handler.chain.GetTd(block.Hash(), block.Number.Uint64())
 		log.Info("Reenabled snap sync as chain is stateless")
-		return downloader.SnapSync, td
+		return ethconfig.SnapSync, td
 	}
 	// Nope, we're really full syncing
 	td := cs.handler.chain.GetTd(head.Hash(), head.Number.Uint64())
-	return downloader.FullSync, td
+	return ethconfig.FullSync, td
 }
 
 // startSync launches doSync in a new goroutine.
@@ -230,7 +246,7 @@ func (cs *chainSyncer) startSync(op *chainSyncOp) {
 // doSync synchronizes the local blockchain with a remote peer.
 func (h *handler) doSync(op *chainSyncOp) error {
 	// Run the sync cycle, and disable snap sync if we're past the pivot block
-	err := h.downloader.LegacySync(op.peer.ID(), op.head, op.td, h.chain.Config().TerminalTotalDifficulty, op.mode)
+	err := h.downloader.LegacySync(op.peer.ID(), op.head, op.peer.Name(), op.td, h.chain.Config().TerminalTotalDifficulty, op.mode)
 	if err != nil {
 		return err
 	}
@@ -245,7 +261,11 @@ func (h *handler) doSync(op *chainSyncOp) error {
 		// degenerate connectivity, but it should be healthy for the mainnet too to
 		// more reliably update peers or the local TD state.
 		if block := h.chain.GetBlock(head.Hash(), head.Number.Uint64()); block != nil {
-			h.BroadcastBlock(block, false)
+			if head.Number.Uint64() == 1 { // Update TD from all receivers during network initialization.
+				h.BroadcastBlock(block, true)
+			} else {
+				h.BroadcastBlock(block, false)
+			}
 		}
 	}
 	return nil

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -50,23 +51,25 @@ var allPrecompiles = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{2}):    &sha256hash{},
 	common.BytesToAddress([]byte{3}):    &ripemd160hash{},
 	common.BytesToAddress([]byte{4}):    &dataCopy{},
-	common.BytesToAddress([]byte{5}):    &bigModExp{eip2565: false},
-	common.BytesToAddress([]byte{0xf5}): &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{5}):    &bigModExp{eip2565: false, eip7883: false},
+	common.BytesToAddress([]byte{0xf5}): &bigModExp{eip2565: true, eip7883: false},
+	common.BytesToAddress([]byte{0xf6}): &bigModExp{eip2565: true, eip7883: true},
 	common.BytesToAddress([]byte{6}):    &bn256AddIstanbul{},
 	common.BytesToAddress([]byte{7}):    &bn256ScalarMulIstanbul{},
 	common.BytesToAddress([]byte{8}):    &bn256PairingIstanbul{},
 	common.BytesToAddress([]byte{9}):    &blake2F{},
 	common.BytesToAddress([]byte{0x0a}): &kzgPointEvaluation{},
 
+	common.BytesToAddress([]byte{0x1, 0x00}):  &p256Verify{eip7951: true},
 	common.BytesToAddress([]byte{0x0f, 0x0a}): &bls12381G1Add{},
-	common.BytesToAddress([]byte{0x0f, 0x0b}): &bls12381G1Mul{},
-	common.BytesToAddress([]byte{0x0f, 0x0c}): &bls12381G1MultiExp{},
-	common.BytesToAddress([]byte{0x0f, 0x0d}): &bls12381G2Add{},
-	common.BytesToAddress([]byte{0x0f, 0x0e}): &bls12381G2Mul{},
-	common.BytesToAddress([]byte{0x0f, 0x0f}): &bls12381G2MultiExp{},
-	common.BytesToAddress([]byte{0x0f, 0x10}): &bls12381Pairing{},
-	common.BytesToAddress([]byte{0x0f, 0x11}): &bls12381MapG1{},
-	common.BytesToAddress([]byte{0x0f, 0x12}): &bls12381MapG2{},
+	common.BytesToAddress([]byte{0x0f, 0x0b}): &bls12381G1MultiExp{},
+	common.BytesToAddress([]byte{0x0f, 0x0c}): &bls12381G2Add{},
+	common.BytesToAddress([]byte{0x0f, 0x0d}): &bls12381G2MultiExp{},
+	common.BytesToAddress([]byte{0x0f, 0x0e}): &bls12381Pairing{},
+	common.BytesToAddress([]byte{0x0f, 0x0f}): &bls12381MapG1{},
+	common.BytesToAddress([]byte{0x0f, 0x10}): &bls12381MapG2{},
+	common.BytesToAddress([]byte{102}):        &blsSignatureVerify{},
+	common.BytesToAddress([]byte{104}):        &verifyDoubleSignEvidence{},
 }
 
 // EIP-152 test vectors
@@ -98,7 +101,7 @@ func testPrecompiled(addr string, test precompiledTest, t *testing.T) {
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
-		if res, _, err := RunPrecompiledContract(p, in, gas); err != nil {
+		if res, _, err := RunPrecompiledContract(nil, p, common.HexToAddress(addr), in, NewGasBudget(gas), nil, params.Rules{}); err != nil {
 			t.Error(err)
 		} else if common.Bytes2Hex(res) != test.Expected {
 			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
@@ -117,10 +120,10 @@ func testPrecompiled(addr string, test precompiledTest, t *testing.T) {
 func testPrecompiledOOG(addr string, test precompiledTest, t *testing.T) {
 	p := allPrecompiles[common.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
-	gas := p.RequiredGas(in) - 1
+	gas := test.Gas - 1
 
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
-		_, _, err := RunPrecompiledContract(p, in, gas)
+		_, _, err := RunPrecompiledContract(nil, p, common.HexToAddress(addr), in, NewGasBudget(gas), nil, params.Rules{})
 		if err.Error() != "out of gas" {
 			t.Errorf("Expected error [out of gas], got [%v]", err)
 		}
@@ -137,7 +140,7 @@ func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
 	t.Run(test.Name, func(t *testing.T) {
-		_, _, err := RunPrecompiledContract(p, in, gas)
+		_, _, err := RunPrecompiledContract(nil, p, common.HexToAddress(addr), in, NewGasBudget(gas), nil, params.Rules{})
 		if err.Error() != test.ExpectedError {
 			t.Errorf("Expected error [%v], got [%v]", test.ExpectedError, err)
 		}
@@ -166,12 +169,10 @@ func benchmarkPrecompiled(addr string, test precompiledTest, bench *testing.B) {
 	bench.Run(fmt.Sprintf("%s-Gas=%d", test.Name, reqGas), func(bench *testing.B) {
 		bench.ReportAllocs()
 		start := time.Now()
-		bench.ResetTimer()
-		for i := 0; i < bench.N; i++ {
+		for bench.Loop() {
 			copy(data, in)
-			res, _, err = RunPrecompiledContract(p, data, reqGas)
+			res, _, err = RunPrecompiledContract(nil, p, common.HexToAddress(addr), data, NewGasBudget(reqGas), nil, params.Rules{})
 		}
-		bench.StopTimer()
 		elapsed := uint64(time.Since(start))
 		if elapsed < 1 {
 			elapsed = 1
@@ -181,7 +182,7 @@ func benchmarkPrecompiled(addr string, test precompiledTest, bench *testing.B) {
 		// Keep it as uint64, multiply 100 to get two digit float later
 		mgasps := (100 * 1000 * gasUsed) / elapsed
 		bench.ReportMetric(float64(mgasps)/100, "mgas/s")
-		//Check if it is correct
+		// Check if it is correct
 		if err != nil {
 			bench.Error(err)
 			return
@@ -233,12 +234,25 @@ func BenchmarkPrecompiledIdentity(bench *testing.B) {
 	benchmarkPrecompiled("04", t, bench)
 }
 
+// Benchmarks the sample inputs from the blsSignatureVerify precompile.
+func BenchmarkPrecompiledBlsSignatureVerify(bench *testing.B) {
+	t := precompiledTest{
+		Input:    "f2d8e8e5bf354429e3ce8b97c4e88f7a0bf7bc917e856de762ed6d70dd8ec2d289a04d63285e4b45309e7c180ea82565e375dd62c7b80d957aea4c9b7e16bdb28a0f910036bd3220fe3d7614fb137a8f0a68b3c564ddd214b5041d8f7a124e6e7285ac42635e75eeb9051a052fb500b1c2bc23bd4290db59fc02be11f2b80896b6e22d5b8dd31ba2e49b13cd6be19fcd01c1e23af3e5165d88d8b9deaf38baa77770fa6a358e2eebdffd1bd8a1eb7386",
+		Expected: "01",
+		Name:     "",
+	}
+	benchmarkPrecompiled("66", t, bench)
+}
+
 // Tests the sample inputs from the ModExp EIP 198.
 func TestPrecompiledModExp(t *testing.T)      { testJson("modexp", "05", t) }
 func BenchmarkPrecompiledModExp(b *testing.B) { benchJson("modexp", "05", b) }
 
 func TestPrecompiledModExpEip2565(t *testing.T)      { testJson("modexp_eip2565", "f5", t) }
 func BenchmarkPrecompiledModExpEip2565(b *testing.B) { benchJson("modexp_eip2565", "f5", b) }
+
+func TestPrecompiledModExpEip7883(t *testing.T)      { testJson("modexp_eip7883", "f6", t) }
+func BenchmarkPrecompiledModExpEip7883(b *testing.B) { benchJson("modexp_eip7883", "f6", b) }
 
 // Tests the sample inputs from the elliptic curve addition EIP 213.
 func TestPrecompiledBn256Add(t *testing.T)      { testJson("bn256Add", "06", t) }
@@ -253,6 +267,30 @@ func TestPrecompiledModExpOOG(t *testing.T) {
 	for _, test := range modexpTests {
 		testPrecompiledOOG("05", test, t)
 	}
+	modexpTestsEIP2565, err := loadJson("modexp_eip2565")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range modexpTestsEIP2565 {
+		testPrecompiledOOG("f5", test, t)
+	}
+	modexpTestsEIP7883, err := loadJson("modexp_eip7883")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range modexpTestsEIP7883 {
+		testPrecompiledOOG("f6", test, t)
+	}
+	gasCostTest := precompiledTest{
+		Input:       "000000000000000000000000000000000000000000000000000000000000082800000000000000000000000000000000000000000000000040000000000000090000000000000000000000000000000000000000000000000000000000000600000000adadadad00000000ff31ff00000006ffffffffffffffffffffffffffffffffffffffff0000000000000004ffffffffffffff0000000000000000000000000000000000000000d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0000001000200fefffeff01000100000000000000ffff01000100ffffffff01000100ffffffff0000050001000100fefffdff02000300ff000000000000012b000000000000090000000000000000000000000000000000000000000000000000ffffff000000000200fffffeff00000001000000000001000200fefffeff010001000000000000000000423034000000000011006161ffbf640053004f00ff00fffffffffffffff3ff00000000000f00002dffffffffff0000000000000000000061999999999999999999999999899961ffffffff0100010000000000000000000000000600000000adadadad00000000ffff00000006fffffdffffffffffffffffffffffffffffffffff0000000000000004ffffffffffffff000000000000000000000000000000000000000098000000966375726c2f66000030000000000011006161ffbf640053004f002d00000000a200000000000000ff1818183fffffffff3a6e756c6c2c22223a6e7500006c2000000000002d2d0000000000000000000144ccef0100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000fdff000000ff00290001000009000000000000000000000000000000000000000000000000a50004ff2800000000000000000000000000000000000000000000000001000000000000090000000000000000000000030000000000000000002b00000000000000000600000000adadadad00000000ffff00000006ffffffffffffffffffffffffffffffffffffffff0000000000000004ffffffffffffff0000000000000000000000000000000000000000d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d000000000717a1a001a1a1a1a1a1a000000121212121212121212121212121212121212121212d0d0d0d01212121212121212121212121212121212121212121212121212121212121212121212121212121212121212373800002d35373837346137346161610000000000000000d0d0d0d0d0d0d0d0002d3533321a1a000000d0d0d0d0d0d0d0d0d0d0d0d0d0d000000000717a1a001a1a1a1a1a1a000000121212121212121212121212121212121212121212d0d0d0d012121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121a1212121212121212000000000000000000000000d0d0d0d0d0d0d0d0002d3533321a1a0000000000000000000000003300000001000f5b00001100712c6eff9e61000000000061000000fbffff1a1a3a6e353900756c6c7d3b00000000009100002d35ff00600000000000000000002d3533321a1a1a1a3a6e353900756c6c7d3b000000000091373800002d3537383734613734616161d0d0d0d0d000000000717a1a001a1a1a1a1a1a000000121212121212121212121212121212121212121212d0d0d0d012121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121a1212121212121212000000000000000000000000d0d0d0d0d0d0d0d0002d3533321a1a0000000000000000000000003300000001000f5b00001100712c6eff9e61000000000061000000fbffff1a1a3a6e353900756c6c7d3b00000000009100002d35ff00600000000000000000002d3533321a1a1a1a3a6e353900756c6c7d3b000000000091373800002d353738373461373461616100000000000000000000000000000000000000000000000001000000000000090000000000000000000000030000000000000000002b00000000000000000600000000adadadad00000000ffff00000006ffffffffffffffffffffffffffffffffffffffff0000000000000004ffffffffffffff0000000000000000000000000000000000000000d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d000000000717a1a001a1a1a1a1a1a000000121212121212121212121212121212121212121212d0d0d0d01212121212121212121212121212121212121212121212121212121212121212121212121212121212121212373800002d35373837346137346161610000000000000000d0d0d0d0d0d0d0d0002d3533321a1a000000d0d0d0d0d0d0d0d0d0d0d0d0d0d000000000717a1a001a1a1a1a1a1a000000121212121212121212121212121212121212121212d0d0d0d012121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121a1212121212121212000000000000000000000000d0d0d0d0d0d0d0d0002d3533321a1a0000000000000000000000003300000001000f5b00001100712c6eff9e61000000000061000000fbffff1a1a3a6e353900756c6c7d3b00000000009100002d35ff00600000000000000000002d3533321a1a1a1a3a6e353900756c6c7d3b000000000091373800002d3537383734613734616161d0d0d0d0d000000000717a1a001a1a1a1a1a1a0000001212121212121212121212121212121212121212000000000000003300000001000f5b00001100712c6eff9e61000000000061000000fbffff1a1a3a6e353900756c6c7d3b00000000009100002d35ff00600000000000000000002d3533321a1a1a1a3a6e353900756c6c7d3b000000000091373800002d3537383734613734616161",
+		Expected:    "000000000000000000000000000000000000000000000000",
+		Name:        "oss_fuzz_gas_calc",
+		Gas:         18446744073709551615,
+		NoBenchmark: false,
+	}
+	testPrecompiledOOG("05", gasCostTest, t)
+	testPrecompiledOOG("f5", gasCostTest, t)
+	testPrecompiledOOG("f6", gasCostTest, t)
 }
 
 // Tests the sample inputs from the elliptic curve scalar multiplication EIP 213.
@@ -306,36 +344,40 @@ func benchJson(name, addr string, b *testing.B) {
 
 func TestPrecompiledBLS12381G1Add(t *testing.T)      { testJson("blsG1Add", "f0a", t) }
 func TestPrecompiledBLS12381G1Mul(t *testing.T)      { testJson("blsG1Mul", "f0b", t) }
-func TestPrecompiledBLS12381G1MultiExp(t *testing.T) { testJson("blsG1MultiExp", "f0c", t) }
-func TestPrecompiledBLS12381G2Add(t *testing.T)      { testJson("blsG2Add", "f0d", t) }
-func TestPrecompiledBLS12381G2Mul(t *testing.T)      { testJson("blsG2Mul", "f0e", t) }
-func TestPrecompiledBLS12381G2MultiExp(t *testing.T) { testJson("blsG2MultiExp", "f0f", t) }
-func TestPrecompiledBLS12381Pairing(t *testing.T)    { testJson("blsPairing", "f10", t) }
-func TestPrecompiledBLS12381MapG1(t *testing.T)      { testJson("blsMapG1", "f11", t) }
-func TestPrecompiledBLS12381MapG2(t *testing.T)      { testJson("blsMapG2", "f12", t) }
+func TestPrecompiledBLS12381G1MultiExp(t *testing.T) { testJson("blsG1MultiExp", "f0b", t) }
+func TestPrecompiledBLS12381G2Add(t *testing.T)      { testJson("blsG2Add", "f0c", t) }
+func TestPrecompiledBLS12381G2Mul(t *testing.T)      { testJson("blsG2Mul", "f0d", t) }
+func TestPrecompiledBLS12381G2MultiExp(t *testing.T) { testJson("blsG2MultiExp", "f0d", t) }
+func TestPrecompiledBLS12381Pairing(t *testing.T)    { testJson("blsPairing", "f0e", t) }
+func TestPrecompiledBLS12381MapG1(t *testing.T)      { testJson("blsMapG1", "f0f", t) }
+func TestPrecompiledBLS12381MapG2(t *testing.T)      { testJson("blsMapG2", "f10", t) }
+
+func TestPrecompiledBlsSignatureVerify(t *testing.T) { testJson("blsSignatureVerify", "66", t) }
 
 func TestPrecompiledPointEvaluation(t *testing.T) { testJson("pointEvaluation", "0a", t) }
 
+func BenchmarkPrecompiledPointEvaluation(b *testing.B) { benchJson("pointEvaluation", "0a", b) }
+
 func BenchmarkPrecompiledBLS12381G1Add(b *testing.B)      { benchJson("blsG1Add", "f0a", b) }
-func BenchmarkPrecompiledBLS12381G1Mul(b *testing.B)      { benchJson("blsG1Mul", "f0b", b) }
-func BenchmarkPrecompiledBLS12381G1MultiExp(b *testing.B) { benchJson("blsG1MultiExp", "f0c", b) }
-func BenchmarkPrecompiledBLS12381G2Add(b *testing.B)      { benchJson("blsG2Add", "f0d", b) }
-func BenchmarkPrecompiledBLS12381G2Mul(b *testing.B)      { benchJson("blsG2Mul", "f0e", b) }
-func BenchmarkPrecompiledBLS12381G2MultiExp(b *testing.B) { benchJson("blsG2MultiExp", "f0f", b) }
-func BenchmarkPrecompiledBLS12381Pairing(b *testing.B)    { benchJson("blsPairing", "f10", b) }
-func BenchmarkPrecompiledBLS12381MapG1(b *testing.B)      { benchJson("blsMapG1", "f11", b) }
-func BenchmarkPrecompiledBLS12381MapG2(b *testing.B)      { benchJson("blsMapG2", "f12", b) }
+func BenchmarkPrecompiledBLS12381G1MultiExp(b *testing.B) { benchJson("blsG1MultiExp", "f0b", b) }
+func BenchmarkPrecompiledBLS12381G2Add(b *testing.B)      { benchJson("blsG2Add", "f0c", b) }
+func BenchmarkPrecompiledBLS12381G2MultiExp(b *testing.B) { benchJson("blsG2MultiExp", "f0d", b) }
+func BenchmarkPrecompiledBLS12381Pairing(b *testing.B)    { benchJson("blsPairing", "f0e", b) }
+func BenchmarkPrecompiledBLS12381MapG1(b *testing.B)      { benchJson("blsMapG1", "f0f", b) }
+func BenchmarkPrecompiledBLS12381MapG2(b *testing.B)      { benchJson("blsMapG2", "f10", b) }
 
 // Failure tests
 func TestPrecompiledBLS12381G1AddFail(t *testing.T)      { testJsonFail("blsG1Add", "f0a", t) }
 func TestPrecompiledBLS12381G1MulFail(t *testing.T)      { testJsonFail("blsG1Mul", "f0b", t) }
-func TestPrecompiledBLS12381G1MultiExpFail(t *testing.T) { testJsonFail("blsG1MultiExp", "f0c", t) }
-func TestPrecompiledBLS12381G2AddFail(t *testing.T)      { testJsonFail("blsG2Add", "f0d", t) }
-func TestPrecompiledBLS12381G2MulFail(t *testing.T)      { testJsonFail("blsG2Mul", "f0e", t) }
-func TestPrecompiledBLS12381G2MultiExpFail(t *testing.T) { testJsonFail("blsG2MultiExp", "f0f", t) }
-func TestPrecompiledBLS12381PairingFail(t *testing.T)    { testJsonFail("blsPairing", "f10", t) }
-func TestPrecompiledBLS12381MapG1Fail(t *testing.T)      { testJsonFail("blsMapG1", "f11", t) }
-func TestPrecompiledBLS12381MapG2Fail(t *testing.T)      { testJsonFail("blsMapG2", "f12", t) }
+func TestPrecompiledBLS12381G1MultiExpFail(t *testing.T) { testJsonFail("blsG1MultiExp", "f0b", t) }
+func TestPrecompiledBLS12381G2AddFail(t *testing.T)      { testJsonFail("blsG2Add", "f0c", t) }
+func TestPrecompiledBLS12381G2MulFail(t *testing.T)      { testJsonFail("blsG2Mul", "f0d", t) }
+func TestPrecompiledBLS12381G2MultiExpFail(t *testing.T) { testJsonFail("blsG2MultiExp", "f0d", t) }
+func TestPrecompiledBLS12381PairingFail(t *testing.T)    { testJsonFail("blsPairing", "f0e", t) }
+func TestPrecompiledBLS12381MapG1Fail(t *testing.T)      { testJsonFail("blsMapG1", "f0f", t) }
+func TestPrecompiledBLS12381MapG2Fail(t *testing.T)      { testJsonFail("blsMapG2", "f10", t) }
+
+func TestPrecompiledBlsSignatureVerifyFail(t *testing.T) { testJson("blsSignatureVerify", "66", t) }
 
 func loadJson(name string) ([]precompiledTest, error) {
 	data, err := os.ReadFile(fmt.Sprintf("testdata/precompiles/%v.json", name))
@@ -372,7 +414,7 @@ func BenchmarkPrecompiledBLS12381G1MultiExpWorstCase(b *testing.B) {
 		Name:        "WorstCaseG1",
 		NoBenchmark: false,
 	}
-	benchmarkPrecompiled("0c", testcase, b)
+	benchmarkPrecompiled("f0b", testcase, b)
 }
 
 // BenchmarkPrecompiledBLS12381G2MultiExpWorstCase benchmarks the worst case we could find that still fits a gaslimit of 10MGas.
@@ -393,5 +435,38 @@ func BenchmarkPrecompiledBLS12381G2MultiExpWorstCase(b *testing.B) {
 		Name:        "WorstCaseG2",
 		NoBenchmark: false,
 	}
-	benchmarkPrecompiled("0f", testcase, b)
+	benchmarkPrecompiled("f0d", testcase, b)
+}
+
+// Benchmarks the sample inputs from the P256VERIFY precompile.
+func BenchmarkPrecompiledP256Verify(bench *testing.B) {
+	t := precompiledTest{
+		Input:    "4cee90eb86eaa050036147a12d49004b6b9c72bd725d39d4785011fe190f0b4da73bd4903f0ce3b639bbbf6e8e80d16931ff4bcf5993d58468e8fb19086e8cac36dbcd03009df8c59286b162af3bd7fcc0450c9aa81be5d10d312af6c66b1d604aebd3099c618202fcfe16ae7770b0c49ab5eadf74b754204a3bb6060e44eff37618b065f9832de4ca6ca971a7a1adc826d0f7c00181a5fb2ddf79ae00b4e10e",
+		Expected: "0000000000000000000000000000000000000000000000000000000000000001",
+		Name:     "p256Verify",
+	}
+	benchmarkPrecompiled("100", t, bench)
+}
+
+func TestPrecompiledP256Verify(t *testing.T) { testJson("p256Verify", "100", t) }
+
+func TestDoubleSignSlash(t *testing.T) {
+	tc := precompiledTest{
+		Input:    "f906278202cab9030ff9030ca01062d3d5015b9242bc193a9b0769f3d3780ecb55f97f40a752ae26d0b68cd0d8a0fae1a05fcb14bfd9b8a9f2b65007a9b6c2000de0627a73be644dd993d32342c494976ea74026e726554db657fa54763abd0c3a0aa9a0f385cc58ed297ff0d66eb5580b02853d3478ba418b1819ac659ee05df49b9794a0bf88464af369ed6b8cf02db00f0b9556ffa8d49cd491b00952a7f83431446638a00a6d0870e586a76278fbfdcedf76ef6679af18fc1f9137cfad495f434974ea81b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001820cdf830f4240830f4240846555fa64b90111d983010301846765746888676f312e32302e378664617277696e00007abd731ef8ae07b86091cb8836d58f5444b883422a18825d899035d3e6ea39ad1a50069bf0b86da8b5573dde1cb4a0a34f19ce94e0ef78ff7518c80265b8a3ca56e3c60167523590d4e8dcc324900559465fc0fa403774096614e135de280949b58a45cc96f2ba9e17f848820d41a08429d0d8b33ee72a84f750fefea846cbca54e487129c7961c680bb72309ca888820d42a08c9db14d938b19f9e2261bbeca2679945462be2b58103dfff73665d0d150fb8a804ae755e0fe64b59753f4db6308a1f679747bce186aa2c62b95fa6eeff3fbd08f3b0667e45428a54ade15bad19f49641c499b431b36f65803ea71b379e6b61de501a0232c9ba2d41b40d36ed794c306747bcbc49bf61a0f37409c18bfe2b5bef26a2d880000000000000000b9030ff9030ca01062d3d5015b9242bc193a9b0769f3d3780ecb55f97f40a752ae26d0b68cd0d8a0b2789a5357827ed838335283e15c4dcc42b9bebcbf2919a18613246787e2f96094976ea74026e726554db657fa54763abd0c3a0aa9a071ce4c09ee275206013f0063761bc19c93c13990582f918cc57333634c94ce89a00e095703e5c9b149f253fe89697230029e32484a410b4b1f2c61442d73c3095aa0d317ae19ede7c8a2d3ac9ef98735b049bcb7278d12f48c42b924538b60a25e12b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001820cdf830f4240830f4240846555fa64b90111d983010301846765746888676f312e32302e378664617277696e00007abd731ef8ae07b86091cb8836d58f5444b883422a18825d899035d3e6ea39ad1a50069bf0b86da8b5573dde1cb4a0a34f19ce94e0ef78ff7518c80265b8a3ca56e3c60167523590d4e8dcc324900559465fc0fa403774096614e135de280949b58a45cc96f2ba9e17f848820d41a08429d0d8b33ee72a84f750fefea846cbca54e487129c7961c680bb72309ca888820d42a08c9db14d938b19f9e2261bbeca2679945462be2b58103dfff73665d0d150fb8a80c0b17bfe88534296ff064cb7156548f6deba2d6310d5044ed6485f087dc6ef232e051c28e1909c2b50a3b4f29345d66681c319bef653e52e5d746480d5a3983b00a0b56228685be711834d0f154292d07826dea42a0fad3e4f56c31470b7fbfbea26880000000000000000",
+		Expected: "15d34aaf54267db7d7c367839aaf71a00a2c6a650000000000000000000000000000000000000000000000000000000000000cdf",
+		Gas:      10000,
+		Name:     "",
+	}
+
+	testPrecompiled("68", tc, t)
+}
+
+func TestDoubleSignSlashFailure(t *testing.T) {
+	tc := precompiledFailureTest{
+		Input:         "f9066b38b90332f9032fa01062d3d5015b9242bc193a9b0769f3d3780ecb55f97f40a752ae26d0b68cd0d8a0fae1a05fcb14bfd9b8a9f2b65007a9b6c2000de0627a73be644dd993d32342c494df87f0e2b8519ea2dd4abd8b639cdd628497ed25a0f385cc58ed297ff0d66eb5580b02853d3478ba418b1819ac659ee05df49b9794a0bf88464af369ed6b8cf02db00f0b9556ffa8d49cd491b00952a7f83431446638a00a6d0870e586a76278fbfdcedf76ef6679af18fc1f9137cfad495f434974ea81b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001a1010000000000000000000000000000000000000000000000000000000000000000830f4240830f42408465bc6996b90115d983010306846765746889676f312e32302e3131856c696e7578000053474aa9f8b25fb860b0844a5082bfaa2299d2a23f076e2f6b17b15f839cc3e7d5a875656f6733fd4b87ba3401f906d15f3dea263cd9a6076107c7db620a4630dd3832c4a4b57eb8f497e28a3d69e5c03b30205c4b45675747d513e1accd66329770f3c35b18c9d023f84c84023a5ad6a086a28d985d9a6c8e7f9a4feadd5ace0adba9818e1e1727edca755fcc0bd8344684023a5ad7a0bc3492196b2e68b8e6ceea87cfa7588b4d590089eb885c4f2c1e9d9fb450f7b980988e1b9d0beb91dab063e04879a24c43d33baae3759dee41fd62ffa83c77fd202bea27a829b49e8025bdd198393526dd12b223ab16052fd26a43f3aabf63e76901a0232c9ba2d41b40d36ed794c306747bcbc49bf61a0f37409c18bfe2b5bef26a2d880000000000000000b90332f9032fa01062d3d5015b9242bc193a9b0769f3d3780ecb55f97f40a752ae26d0b68cd0d8a0b2789a5357827ed838335283e15c4dcc42b9bebcbf2919a18613246787e2f96094df87f0e2b8519ea2dd4abd8b639cdd628497ed25a071ce4c09ee275206013f0063761bc19c93c13990582f918cc57333634c94ce89a00e095703e5c9b149f253fe89697230029e32484a410b4b1f2c61442d73c3095aa0d317ae19ede7c8a2d3ac9ef98735b049bcb7278d12f48c42b924538b60a25e12b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001a1010000000000000000000000000000000000000000000000000000000000000000830f4240830f42408465bc6996b90115d983010306846765746889676f312e32302e3131856c696e7578000053474aa9f8b25fb860b0844a5082bfaa2299d2a23f076e2f6b17b15f839cc3e7d5a875656f6733fd4b87ba3401f906d15f3dea263cd9a6076107c7db620a4630dd3832c4a4b57eb8f497e28a3d69e5c03b30205c4b45675747d513e1accd66329770f3c35b18c9d023f84c84023a5ad6a086a28d985d9a6c8e7f9a4feadd5ace0adba9818e1e1727edca755fcc0bd8344684023a5ad7a0bc3492196b2e68b8e6ceea87cfa7588b4d590089eb885c4f2c1e9d9fb450f7b9804c71ed015dd0c5c2d7393b68c2927f83f0a5da4c66f761f09e2f950cc610832c7876144599368404096ddef0eadacfde57717e2c7d23982b927285b797d41bfa00a0b56228685be711834d0f154292d07826dea42a0fad3e4f56c31470b7fbfbea26880000000000000000",
+		ExpectedError: errInvalidEvidence.Error(),
+		Name:          "",
+	}
+
+	testPrecompiledFailure("68", tc, t)
 }

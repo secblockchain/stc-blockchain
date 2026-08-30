@@ -21,11 +21,16 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
+	"github.com/ethereum/go-ethereum/eth/protocols/stc"
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/p2p"
+	"github.com/ethereum/go-ethereum/p2p/enode"
 )
 
 var (
@@ -37,6 +42,9 @@ var (
 	// to the peer set, but one with the same id already exists.
 	errPeerAlreadyRegistered = errors.New("peer already registered")
 
+	// errPeerWaitTimeout is returned if a peer waits extension for too long
+	errPeerWaitTimeout = errors.New("peer wait timeout")
+
 	// errPeerNotRegistered is returned if a peer is attempted to be removed from
 	// a peer set, but no peer with the given id exists.
 	errPeerNotRegistered = errors.New("peer not registered")
@@ -44,6 +52,22 @@ var (
 	// errSnapWithoutEth is returned if a peer attempts to connect only on the
 	// snap protocol without advertising the eth main protocol.
 	errSnapWithoutEth = errors.New("peer connected on snap without compatible eth support")
+
+	// errStcWithoutEth is returned if a peer attempts to connect only on the
+	// stc protocol without advertising the eth main protocol.
+	errStcWithoutEth = errors.New("peer connected on stc without compatible eth support")
+)
+
+const (
+	// extensionWaitTimeout is the maximum allowed time for the extension wait to
+	// complete before dropping the connection as malicious.
+	extensionWaitTimeout = 10 * time.Second
+	tryWaitTimeout       = 100 * time.Millisecond
+)
+
+var (
+	evnWhiteListPeerGuage        = metrics.NewRegisteredGauge("evn/peer/whiteList", nil)
+	evnOnchainValidatorPeerGuage = metrics.NewRegisteredGauge("evn/peer/onchainValidator", nil)
 )
 
 // peerSet represents the collection of active peers currently participating in
@@ -52,8 +76,13 @@ type peerSet struct {
 	peers     map[string]*ethPeer // Peers connected on the `eth` protocol
 	snapPeers int                 // Number of `snap` compatible peers for connection prioritization
 
+	validatorNodeIDsMap map[common.Address][]enode.ID
+
 	snapWait map[string]chan *snap.Peer // Peers connected on `eth` waiting for their snap extension
 	snapPend map[string]*snap.Peer      // Peers connected on the `snap` protocol, but not yet on `eth`
+
+	stcWait map[string]chan *stc.Peer // Peers connected on `eth` waiting for their stc extension
+	stcPend map[string]*stc.Peer      // Peers connected on the `stc` protocol, but not yet on `eth`
 
 	lock   sync.RWMutex
 	closed bool
@@ -66,6 +95,8 @@ func newPeerSet() *peerSet {
 		peers:    make(map[string]*ethPeer),
 		snapWait: make(map[string]chan *snap.Peer),
 		snapPend: make(map[string]*snap.Peer),
+		stcWait:  make(map[string]chan *stc.Peer),
+		stcPend:  make(map[string]*stc.Peer),
 		quitCh:   make(chan struct{}),
 	}
 }
@@ -100,7 +131,37 @@ func (ps *peerSet) registerSnapExtension(peer *snap.Peer) error {
 	return nil
 }
 
-// waitExtensions blocks until all satellite protocols are connected and tracked
+// registerStcExtension unblocks an already connected `eth` peer waiting for its
+// `stc` extension, or if no such peer exists, tracks the extension for the time
+// being until the `eth` main protocol starts looking for it.
+func (ps *peerSet) registerStcExtension(peer *stc.Peer) error {
+	// Reject the peer if it advertises `stc` without `eth` as `stc` is only a
+	// satellite protocol meaningful with the chain selection of `eth`
+	if !peer.RunningCap(eth.ProtocolName, eth.ProtocolVersions) {
+		return errStcWithoutEth
+	}
+	// Ensure nobody can double connect
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+
+	id := peer.ID()
+	if _, ok := ps.peers[id]; ok {
+		return errPeerAlreadyRegistered // avoid connections with the same id as existing ones
+	}
+	if _, ok := ps.stcPend[id]; ok {
+		return errPeerAlreadyRegistered // avoid connections with the same id as pending ones
+	}
+	// Inject the peer into an `eth` counterpart is available, otherwise save for later
+	if wait, ok := ps.stcWait[id]; ok {
+		delete(ps.stcWait, id)
+		wait <- peer
+		return nil
+	}
+	ps.stcPend[id] = peer
+	return nil
+}
+
+// waitSnapExtension blocks until all satellite protocols are connected and tracked
 // by the peerset.
 func (ps *peerSet) waitSnapExtension(peer *eth.Peer) (*snap.Peer, error) {
 	// If the peer does not support a compatible `snap`, don't wait
@@ -132,8 +193,15 @@ func (ps *peerSet) waitSnapExtension(peer *eth.Peer) (*snap.Peer, error) {
 	ps.lock.Unlock()
 
 	select {
-	case p := <-wait:
-		return p, nil
+	case peer := <-wait:
+		return peer, nil
+
+	case <-time.After(extensionWaitTimeout):
+		ps.lock.Lock()
+		delete(ps.snapWait, id)
+		ps.lock.Unlock()
+		return nil, errPeerWaitTimeout
+
 	case <-ps.quitCh:
 		ps.lock.Lock()
 		delete(ps.snapWait, id)
@@ -142,9 +210,74 @@ func (ps *peerSet) waitSnapExtension(peer *eth.Peer) (*snap.Peer, error) {
 	}
 }
 
+// waitStcExtension blocks until all satellite protocols are connected and tracked
+// by the peerset.
+func (ps *peerSet) waitStcExtension(peer *eth.Peer) (*stc.Peer, error) {
+	// If the peer does not support a compatible `stc`, don't wait
+	if !peer.RunningCap(stc.ProtocolName, stc.ProtocolVersions) {
+		return nil, nil
+	}
+	// Ensure nobody can double connect
+	ps.lock.Lock()
+
+	id := peer.ID()
+	if _, ok := ps.peers[id]; ok {
+		ps.lock.Unlock()
+		return nil, errPeerAlreadyRegistered // avoid connections with the same id as existing ones
+	}
+	if _, ok := ps.stcWait[id]; ok {
+		ps.lock.Unlock()
+		return nil, errPeerAlreadyRegistered // avoid connections with the same id as pending ones
+	}
+	// If `stc` already connected, retrieve the peer from the pending set
+	if stcPeer, ok := ps.stcPend[id]; ok {
+		delete(ps.stcPend, id)
+
+		ps.lock.Unlock()
+		return stcPeer, nil
+	}
+	// Otherwise wait for `stc` to connect concurrently
+	wait := make(chan *stc.Peer)
+	ps.stcWait[id] = wait
+	ps.lock.Unlock()
+
+	select {
+	case peer := <-wait:
+		return peer, nil
+
+	case <-time.After(extensionWaitTimeout):
+		// could be deadlock, so we use TryLock to avoid it.
+		if ps.lock.TryLock() {
+			delete(ps.stcWait, id)
+			ps.lock.Unlock()
+			return nil, errPeerWaitTimeout
+		}
+		// if TryLock failed, we wait for a while and try again.
+		for {
+			select {
+			case <-wait:
+				// discard the peer, even though the peer arrived.
+				return nil, errPeerWaitTimeout
+			case <-time.After(tryWaitTimeout):
+				if ps.lock.TryLock() {
+					delete(ps.stcWait, id)
+					ps.lock.Unlock()
+					return nil, errPeerWaitTimeout
+				}
+			}
+		}
+
+	case <-ps.quitCh:
+		ps.lock.Lock()
+		delete(ps.stcWait, id)
+		ps.lock.Unlock()
+		return nil, errPeerSetClosed
+	}
+}
+
 // registerPeer injects a new `eth` peer into the working set, or returns an error
 // if the peer is already known.
-func (ps *peerSet) registerPeer(peer *eth.Peer, ext *snap.Peer) error {
+func (ps *peerSet) registerPeer(peer *eth.Peer, ext *snap.Peer, stcExt *stc.Peer) error {
 	// Start tracking the new peer
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
@@ -162,6 +295,9 @@ func (ps *peerSet) registerPeer(peer *eth.Peer, ext *snap.Peer) error {
 	if ext != nil {
 		eth.snapExt = &snapPeer{ext}
 		ps.snapPeers++
+	}
+	if stcExt != nil {
+		eth.stcExt = &stcPeer{stcExt}
 	}
 	ps.peers[id] = eth
 	return nil
@@ -192,8 +328,90 @@ func (ps *peerSet) peer(id string) *ethPeer {
 	return ps.peers[id]
 }
 
+func (ps *peerSet) setProxyedPeers(proxyedNodeIdsMap map[enode.ID]struct{}) {
+	ps.lock.RLock()
+	peers := make([]*ethPeer, 0, len(ps.peers))
+	for _, peer := range ps.peers {
+		peers = append(peers, peer)
+	}
+	ps.lock.RUnlock()
+
+	proxyedPeerCnt := 0
+	for _, peer := range peers {
+		if _, ok := proxyedNodeIdsMap[peer.NodeID()]; ok {
+			peer.ProxyedPeerFlag.Store(true)
+			proxyedPeerCnt++
+		}
+	}
+	log.Debug("setProxyedPeers", "total", len(peers), "proxyedPeerCnt", proxyedPeerCnt)
+}
+
+// enableEVNFeatures enables the given features for the given peers.
+func (ps *peerSet) enableEVNFeatures(validatorNodeIDsMap map[common.Address][]enode.ID, evnWhitelistMap map[enode.ID]struct{}) {
+	// clone current all peers, and update the validatorNodeIDsMap
+	ps.lock.Lock()
+	peers := make([]*ethPeer, 0, len(ps.peers))
+	for _, peer := range ps.peers {
+		peers = append(peers, peer)
+	}
+	ps.validatorNodeIDsMap = validatorNodeIDsMap
+	ps.lock.Unlock()
+
+	// convert to nodeID filter map, avoid too slow operation for slices.Contains
+	valNodeIDMap := make(map[enode.ID]struct{})
+	for _, nodeIDs := range validatorNodeIDsMap {
+		for _, nodeID := range nodeIDs {
+			valNodeIDMap[nodeID] = struct{}{}
+		}
+	}
+
+	var (
+		whiteListPeerCnt        int64 = 0
+		onchainValidatorPeerCnt int64 = 0
+	)
+	for _, peer := range peers {
+		nodeID := peer.NodeID()
+		_, isValidatorPeer := valNodeIDMap[nodeID]
+		_, isWhitelistPeer := evnWhitelistMap[nodeID]
+
+		if isValidatorPeer || isWhitelistPeer {
+			log.Debug("enable EVNPeerFlag & NoTxBroadcastFlag for", "peer", nodeID)
+			peer.EVNPeerFlag.Store(true)
+		} else {
+			peer.EVNPeerFlag.Store(false)
+		}
+
+		if isValidatorPeer {
+			onchainValidatorPeerCnt++
+		}
+		if isWhitelistPeer {
+			whiteListPeerCnt++
+		}
+	}
+	evnWhiteListPeerGuage.Update(whiteListPeerCnt)
+	evnOnchainValidatorPeerGuage.Update(onchainValidatorPeerCnt)
+	log.Info("enable EVN features", "total", len(peers), "whiteListPeerCnt", whiteListPeerCnt, "onchainValidatorPeerCnt", onchainValidatorPeerCnt)
+}
+
+// isProxyedValidator checks if the received block from the proxyed validator.
+func (ps *peerSet) isProxyedValidator(validator common.Address, proxyedAddressMap map[common.Address]struct{}) bool {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+
+	if len(proxyedAddressMap) == 0 {
+		return false
+	}
+	log.Debug("check whether received block from proxyed peer", "validator", validator, "proxyedAddressMap", proxyedAddressMap)
+
+	// check whether the validator is proxyed validator
+	if _, ok := proxyedAddressMap[validator]; !ok {
+		return false
+	}
+	return true
+}
+
 // peersWithoutBlock retrieves a list of peers that do not have a given block in
-// their set of known hashes so it might be propagated to them.
+// their set of known hashes, so it might be propagated to them.
 func (ps *peerSet) peersWithoutBlock(hash common.Hash) []*ethPeer {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
@@ -204,18 +422,35 @@ func (ps *peerSet) peersWithoutBlock(hash common.Hash) []*ethPeer {
 			list = append(list, p)
 		}
 	}
+	log.Debug("get peers without block", "hash", hash, "total", len(ps.peers), "unknown", len(list))
 	return list
 }
 
-// peersWithoutTransaction retrieves a list of peers that do not have a given
-// transaction in their set of known hashes.
-func (ps *peerSet) peersWithoutTransaction(hash common.Hash) []*ethPeer {
+// allNonEVNPeers returns a slice of all registered peers that do not have
+// the EVNPeerFlag set.
+func (ps *peerSet) allNonEVNPeers() []*ethPeer {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+
+	nonEVNPeers := make([]*ethPeer, 0, len(ps.peers))
+	for _, p := range ps.peers {
+		if !p.EVNPeerFlag.Load() {
+			nonEVNPeers = append(nonEVNPeers, p)
+		}
+	}
+
+	return nonEVNPeers
+}
+
+// peersWithoutVote retrieves a list of peers that do not have a given
+// vote in their set of known hashes.
+func (ps *peerSet) peersWithoutVote(hash common.Hash) []*ethPeer {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
 
 	list := make([]*ethPeer, 0, len(ps.peers))
 	for _, p := range ps.peers {
-		if !p.KnownTransaction(hash) {
+		if p.stcExt != nil && !p.stcExt.KnownVote(hash) {
 			list = append(list, p)
 		}
 	}
@@ -251,6 +486,9 @@ func (ps *peerSet) peerWithHighestTD() *eth.Peer {
 		bestTd   *big.Int
 	)
 	for _, p := range ps.peers {
+		if p.Lagging() {
+			continue
+		}
 		if _, td := p.Head(); bestPeer == nil || td.Cmp(bestTd) > 0 {
 			bestPeer, bestTd = p.Peer, td
 		}

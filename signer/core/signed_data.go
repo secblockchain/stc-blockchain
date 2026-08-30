@@ -17,16 +17,19 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"mime"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus/clique"
+	"github.com/ethereum/go-ethereum/consensus/stcons"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -164,6 +167,41 @@ func (api *SignerAPI) determineSignatureFormat(ctx context.Context, contentType 
 		// Clique uses V on the form 0 or 1
 		useEthereumV = false
 		req = &SignDataRequest{ContentType: mediaType, Rawdata: cliqueRlp, Messages: messages, Hash: sighash}
+	case apitypes.ApplicationStcons.Mime:
+		stringData, ok := data.(string)
+		if !ok {
+			return nil, useEthereumV, fmt.Errorf("input for %v must be an hex-encoded string", apitypes.ApplicationStcons.Mime)
+		}
+		stconsData, err := hexutil.Decode(stringData)
+		if err != nil {
+			return nil, useEthereumV, err
+		}
+		header := &types.Header{}
+		if err := rlp.DecodeBytes(stconsData, header); err != nil {
+			return nil, useEthereumV, err
+		}
+		// The incoming stcons header is already truncated, sent to us with a extradata already shortened
+		if len(header.Extra) < 65 {
+			// Need to add it back, to get a suitable length for hashing
+			newExtra := make([]byte, len(header.Extra)+65)
+			copy(newExtra, header.Extra)
+			header.Extra = newExtra
+		}
+		// Get back the rlp data, encoded by us
+		sighash, stconsRlp, err := stconsHeaderHashAndRlp(header, api.chainID)
+		if err != nil {
+			return nil, useEthereumV, err
+		}
+		messages := []*apitypes.NameValueType{
+			{
+				Name:  "Stcons header",
+				Typ:   "stcons",
+				Value: fmt.Sprintf("stcons header %d [0x%x]", header.Number, header.Hash()),
+			},
+		}
+		// Stcons uses V on the form 0 or 1
+		useEthereumV = false
+		req = &SignDataRequest{ContentType: mediaType, Rawdata: stconsRlp, Messages: messages, Hash: sighash}
 	case apitypes.DataTyped.Mime:
 		// EIP-712 conformant typed data
 		var err error
@@ -219,6 +257,16 @@ func cliqueHeaderHashAndRlp(header *types.Header) (hash, rlp []byte, err error) 
 	return hash, rlp, err
 }
 
+func stconsHeaderHashAndRlp(header *types.Header, chainId *big.Int) (hash, rlp []byte, err error) {
+	if len(header.Extra) < 65 {
+		err = fmt.Errorf("clique header extradata too short, %d < 65", len(header.Extra))
+		return
+	}
+	rlp = stcons.StconsRLP(header, chainId)
+	hash = types.SealHash(header, chainId).Bytes()
+	return hash, rlp, err
+}
+
 // SignTypedData signs EIP-712 conformant typed data
 // hash = keccak256("\x19${byteVersion}${domainSeparator}${hashStruct(message)}")
 // It returns
@@ -260,7 +308,7 @@ func fromHex(data any) ([]byte, error) {
 	return nil, fmt.Errorf("wrong type %T", data)
 }
 
-// typeDataRequest tries to convert the data into a SignDataRequest.
+// typedDataRequest tries to convert the data into a SignDataRequest.
 func typedDataRequest(data any) (*SignDataRequest, error) {
 	var typedData apitypes.TypedData
 	if td, ok := data.(apitypes.TypedData); ok {
@@ -294,7 +342,7 @@ func typedDataRequest(data any) (*SignDataRequest, error) {
 func (api *SignerAPI) EcRecover(ctx context.Context, data hexutil.Bytes, sig hexutil.Bytes) (common.Address, error) {
 	// Returns the address for the Account that was used to create the signature.
 	//
-	// Note, this function is compatible with eth_sign and personal_sign. As such it recovers
+	// Note, this function is compatible with eth_sign. As such it recovers
 	// the address of:
 	// hash = keccak256("\x19Ethereum Signed Message:\n${message length}${message}")
 	// addr = ecrecover(hash, signature)
@@ -309,7 +357,8 @@ func (api *SignerAPI) EcRecover(ctx context.Context, data hexutil.Bytes, sig hex
 	if sig[64] != 27 && sig[64] != 28 {
 		return common.Address{}, errors.New("invalid Ethereum signature (V is not 27 or 28)")
 	}
-	sig[64] -= 27 // Transform yellow paper V from 27/28 to 0/1
+	sig = bytes.Clone(sig) // Avoid mutating the input
+	sig[64] -= 27          // Transform yellow paper V from 27/28 to 0/1
 	hash := accounts.TextHash(data)
 	rpk, err := crypto.SigToPub(hash, sig)
 	if err != nil {

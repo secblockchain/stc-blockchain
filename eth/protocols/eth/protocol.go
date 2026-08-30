@@ -31,6 +31,7 @@ import (
 // Constants to match up protocol versions and messages
 const (
 	ETH68 = 68
+	ETH70 = 70
 )
 
 // ProtocolName is the official short name of the `eth` protocol used during
@@ -39,14 +40,17 @@ const ProtocolName = "eth"
 
 // ProtocolVersions are the supported versions of the `eth` protocol (first
 // is primary).
-var ProtocolVersions = []uint{ETH68}
+var ProtocolVersions = []uint{ETH70, ETH68}
 
 // protocolLengths are the number of implemented message corresponding to
 // different protocol versions.
-var protocolLengths = map[uint]uint64{ETH68: 17}
+var protocolLengths = map[uint]uint64{ETH68: 17, ETH70: 18}
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
 const maxMessageSize = 10 * 1024 * 1024
+
+// This is the maximum number of transactions in a Transactions message.
+const maxTransactionAnnouncements = 5000
 
 const (
 	StatusMsg                     = 0x00
@@ -60,19 +64,23 @@ const (
 	NewPooledTransactionHashesMsg = 0x08
 	GetPooledTransactionsMsg      = 0x09
 	PooledTransactionsMsg         = 0x0a
+	UpgradeStatusMsg              = 0x0b // Protocol messages overloaded in eth/66
 	GetReceiptsMsg                = 0x0f
 	ReceiptsMsg                   = 0x10
+	BlockRangeUpdateMsg           = 0x11
 )
 
 var (
-	errNoStatusMsg             = errors.New("no status message")
 	errMsgTooLarge             = errors.New("message too long")
 	errDecode                  = errors.New("invalid message")
 	errInvalidMsgCode          = errors.New("invalid message code")
 	errProtocolVersionMismatch = errors.New("protocol version mismatch")
-	errNetworkIDMismatch       = errors.New("network ID mismatch")
-	errGenesisMismatch         = errors.New("genesis mismatch")
-	errForkIDRejected          = errors.New("fork ID rejected")
+	// handshake errors
+	errNoStatusMsg       = errors.New("no status message")
+	errNetworkIDMismatch = errors.New("network ID mismatch")
+	errGenesisMismatch   = errors.New("genesis mismatch")
+	errForkIDRejected    = errors.New("fork ID rejected")
+	errInvalidBlockRange = errors.New("invalid block range in status")
 )
 
 // Packet represents a p2p message in the `eth` protocol.
@@ -82,13 +90,57 @@ type Packet interface {
 }
 
 // StatusPacket is the network packet for the status message.
-type StatusPacket struct {
+type StatusPacket68 struct {
 	ProtocolVersion uint32
 	NetworkID       uint64
 	TD              *big.Int
 	Head            common.Hash
 	Genesis         common.Hash
 	ForkID          forkid.ID
+}
+
+type UpgradeStatusExtension struct {
+	DisablePeerTxBroadcast bool
+}
+
+func (e *UpgradeStatusExtension) Encode() (*rlp.RawValue, error) {
+	rawBytes, err := rlp.EncodeToBytes(e)
+	if err != nil {
+		return nil, err
+	}
+	raw := rlp.RawValue(rawBytes)
+	return &raw, nil
+}
+
+type UpgradeStatusPacket struct {
+	Extension *rlp.RawValue `rlp:"nil"`
+}
+
+func (p *UpgradeStatusPacket) GetExtension() (*UpgradeStatusExtension, error) {
+	extension := &UpgradeStatusExtension{}
+	if p.Extension == nil {
+		return extension, nil
+	}
+	err := rlp.DecodeBytes(*p.Extension, extension)
+	if err != nil {
+		return nil, err
+	}
+	return extension, nil
+}
+
+// StatusPacket is the network packet for the eth/70 status message. It follows
+// upstream eth/70, except that STC retains TD for Stcons chain synchronization.
+// Unlike eth/68, eth/70 does not exchange UpgradeStatusMsg.
+type StatusPacket struct {
+	ProtocolVersion uint32
+	NetworkID       uint64
+	TD              *big.Int
+	Genesis         common.Hash
+	ForkID          forkid.ID
+	// initial available block range
+	EarliestBlock   uint64
+	LatestBlock     uint64
+	LatestBlockHash common.Hash
 }
 
 // NewBlockHashesPacket is the network packet for the block announcements.
@@ -112,7 +164,9 @@ func (p *NewBlockHashesPacket) Unpack() ([]common.Hash, []uint64) {
 }
 
 // TransactionsPacket is the network packet for broadcasting new transactions.
-type TransactionsPacket []*types.Transaction
+type TransactionsPacket struct {
+	rlp.RawList[*types.Transaction]
+}
 
 // GetBlockHeadersRequest represents a block header query.
 type GetBlockHeadersRequest struct {
@@ -170,7 +224,7 @@ type BlockHeadersRequest []*types.Header
 // BlockHeadersPacket represents a block header response over with request ID wrapping.
 type BlockHeadersPacket struct {
 	RequestId uint64
-	BlockHeadersRequest
+	List      rlp.RawList[*types.Header]
 }
 
 // BlockHeadersRLPResponse represents a block header response, to use when we already
@@ -185,8 +239,9 @@ type BlockHeadersRLPPacket struct {
 
 // NewBlockPacket is the network packet for the block propagation message.
 type NewBlockPacket struct {
-	Block *types.Block
-	TD    *big.Int
+	Block    *types.Block
+	TD       *big.Int
+	Sidecars types.BlobSidecars `rlp:"optional"`
 }
 
 // sanityCheck verifies that the values are reasonable, as a DoS protection
@@ -199,6 +254,15 @@ func (request *NewBlockPacket) sanityCheck() error {
 	if tdlen := request.TD.BitLen(); tdlen > 100 {
 		return fmt.Errorf("too large block TD: bitlen %d", tdlen)
 	}
+
+	if len(request.Sidecars) > 0 {
+		for _, sidecar := range request.Sidecars {
+			if err := sidecar.SanityCheck(request.Block.Number(), request.Block.Hash()); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -211,14 +275,11 @@ type GetBlockBodiesPacket struct {
 	GetBlockBodiesRequest
 }
 
-// BlockBodiesResponse is the network packet for block content distribution.
-type BlockBodiesResponse []*BlockBody
-
 // BlockBodiesPacket is the network packet for block content distribution with
 // request ID wrapping.
 type BlockBodiesPacket struct {
 	RequestId uint64
-	BlockBodiesResponse
+	List      rlp.RawList[BlockBody]
 }
 
 // BlockBodiesRLPResponse is used for replying to block body requests, in cases
@@ -232,55 +293,66 @@ type BlockBodiesRLPPacket struct {
 	BlockBodiesRLPResponse
 }
 
+// BlockBodiesResponse is the network packet for block content distribution.
+type BlockBodiesResponse []BlockBody
+
 // BlockBody represents the data content of a single block.
 type BlockBody struct {
-	Transactions []*types.Transaction // Transactions contained within a block
-	Uncles       []*types.Header      // Uncles contained within a block
-	Withdrawals  []*types.Withdrawal  `rlp:"optional"` // Withdrawals contained within a block
-}
-
-// Unpack retrieves the transactions and uncles from the range packet and returns
-// them in a split flat format that's more consistent with the internal data structures.
-func (p *BlockBodiesResponse) Unpack() ([][]*types.Transaction, [][]*types.Header, [][]*types.Withdrawal) {
-	// TODO(matt): add support for withdrawals to fetchers
-	var (
-		txset         = make([][]*types.Transaction, len(*p))
-		uncleset      = make([][]*types.Header, len(*p))
-		withdrawalset = make([][]*types.Withdrawal, len(*p))
-	)
-	for i, body := range *p {
-		txset[i], uncleset[i], withdrawalset[i] = body.Transactions, body.Uncles, body.Withdrawals
-	}
-	return txset, uncleset, withdrawalset
+	Transactions rlp.RawList[*types.Transaction]
+	Uncles       rlp.RawList[*types.Header]
+	Withdrawals  *rlp.RawList[*types.Withdrawal]  `rlp:"optional"`
+	Sidecars     *rlp.RawList[*types.BlobSidecar] `rlp:"optional"`
 }
 
 // GetReceiptsRequest represents a block receipts query.
 type GetReceiptsRequest []common.Hash
 
-// GetReceiptsPacket represents a block receipts query with request ID wrapping.
-type GetReceiptsPacket struct {
+// GetReceiptsPacket68 represents a block receipts query with request ID wrapping.
+type GetReceiptsPacket68 struct {
 	RequestId uint64
 	GetReceiptsRequest
 }
 
+// ReceiptsRLPPacket68 is ReceiptsRLPResponse with request ID wrapping.
+type ReceiptsRLPPacket68 struct {
+	RequestId uint64
+	ReceiptsRLPResponse
+}
+
+// GetReceiptsPacket70 represents a block receipts query with request ID and
+// FirstBlockReceiptIndex wrapping.
+type GetReceiptsPacket70 struct {
+	RequestId              uint64
+	FirstBlockReceiptIndex uint64
+	GetReceiptsRequest
+}
+
 // ReceiptsResponse is the network packet for block receipts distribution.
-type ReceiptsResponse [][]*types.Receipt
+type ReceiptsResponse []types.Receipts
+
+// ReceiptsList is a type constraint for block receceipt list types.
+type ReceiptsList interface {
+	*ReceiptList68
+	setBuffers(*receiptListBuffers)
+	EncodeForStorage() (rlp.RawValue, error)
+	Derivable() types.DerivableList
+}
 
 // ReceiptsPacket is the network packet for block receipts distribution with
 // request ID wrapping.
-type ReceiptsPacket struct {
+type ReceiptsPacket[L ReceiptsList] struct {
 	RequestId uint64
-	ReceiptsResponse
+	List      rlp.RawList[L]
+}
+
+type ReceiptsPacket70 struct {
+	RequestId           uint64
+	LastBlockIncomplete bool
+	List                rlp.RawList[*ReceiptList]
 }
 
 // ReceiptsRLPResponse is used for receipts, when we already have it encoded
 type ReceiptsRLPResponse []rlp.RawValue
-
-// ReceiptsRLPPacket is ReceiptsRLPResponse with request ID wrapping.
-type ReceiptsRLPPacket struct {
-	RequestId uint64
-	ReceiptsRLPResponse
-}
 
 // NewPooledTransactionHashesPacket represents a transaction announcement packet on eth/68 and newer.
 type NewPooledTransactionHashesPacket struct {
@@ -305,7 +377,7 @@ type PooledTransactionsResponse []*types.Transaction
 // with request ID wrapping.
 type PooledTransactionsPacket struct {
 	RequestId uint64
-	PooledTransactionsResponse
+	List      rlp.RawList[*types.Transaction]
 }
 
 // PooledTransactionsRLPResponse is the network packet for transaction distribution, used
@@ -318,8 +390,21 @@ type PooledTransactionsRLPPacket struct {
 	PooledTransactionsRLPResponse
 }
 
+// BlockRangeUpdatePacket is an announcement of the node's available block range.
+type BlockRangeUpdatePacket struct {
+	EarliestBlock   uint64
+	LatestBlock     uint64
+	LatestBlockHash common.Hash
+}
+
+func (*StatusPacket68) Name() string { return "Status" }
+func (*StatusPacket68) Kind() byte   { return StatusMsg }
+
 func (*StatusPacket) Name() string { return "Status" }
 func (*StatusPacket) Kind() byte   { return StatusMsg }
+
+func (*UpgradeStatusPacket) Name() string { return "UpgradeStatus" }
+func (*UpgradeStatusPacket) Kind() byte   { return UpgradeStatusMsg }
 
 func (*NewBlockHashesPacket) Name() string { return "NewBlockHashes" }
 func (*NewBlockHashesPacket) Kind() byte   { return NewBlockHashesMsg }
@@ -348,11 +433,17 @@ func (*NewPooledTransactionHashesPacket) Kind() byte   { return NewPooledTransac
 func (*GetPooledTransactionsRequest) Name() string { return "GetPooledTransactions" }
 func (*GetPooledTransactionsRequest) Kind() byte   { return GetPooledTransactionsMsg }
 
-func (*PooledTransactionsResponse) Name() string { return "PooledTransactions" }
-func (*PooledTransactionsResponse) Kind() byte   { return PooledTransactionsMsg }
+func (*PooledTransactionsPacket) Name() string { return "PooledTransactions" }
+func (*PooledTransactionsPacket) Kind() byte   { return PooledTransactionsMsg }
 
 func (*GetReceiptsRequest) Name() string { return "GetReceipts" }
 func (*GetReceiptsRequest) Kind() byte   { return GetReceiptsMsg }
 
 func (*ReceiptsResponse) Name() string { return "Receipts" }
 func (*ReceiptsResponse) Kind() byte   { return ReceiptsMsg }
+
+func (*ReceiptsRLPResponse) Name() string { return "Receipts" }
+func (*ReceiptsRLPResponse) Kind() byte   { return ReceiptsMsg }
+
+func (*BlockRangeUpdatePacket) Name() string { return "BlockRangeUpdate" }
+func (*BlockRangeUpdatePacket) Kind() byte   { return BlockRangeUpdateMsg }

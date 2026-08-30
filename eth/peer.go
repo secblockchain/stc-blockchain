@@ -17,6 +17,10 @@
 package eth
 
 import (
+	"net"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/eth/protocols/stc"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
 )
@@ -25,19 +29,40 @@ import (
 // about a connected peer.
 type ethPeerInfo struct {
 	Version uint `json:"version"` // Ethereum protocol version negotiated
+	*peerBlockRange
+}
+
+type peerBlockRange struct {
+	Earliest   uint64      `json:"earliestBlock"`
+	Latest     uint64      `json:"latestBlock"`
+	LatestHash common.Hash `json:"latestBlockHash"`
 }
 
 // ethPeer is a wrapper around eth.Peer to maintain a few extra metadata.
 type ethPeer struct {
 	*eth.Peer
 	snapExt *snapPeer // Satellite `snap` connection
+	stcExt  *stcPeer  // Satellite `stc` connection
 }
 
 // info gathers and returns some `eth` protocol metadata known about a peer.
 func (p *ethPeer) info() *ethPeerInfo {
-	return &ethPeerInfo{
-		Version: p.Version(),
+	info := &ethPeerInfo{Version: p.Version()}
+	if br := p.BlockRange(); br != nil {
+		info.peerBlockRange = &peerBlockRange{
+			Earliest:   br.EarliestBlock,
+			Latest:     br.LatestBlock,
+			LatestHash: br.LatestBlockHash,
+		}
 	}
+	return info
+}
+
+func (p *ethPeer) remoteAddr() net.Addr {
+	if p.Peer != nil && p.Peer.Peer != nil {
+		return p.Peer.Peer.RemoteAddr()
+	}
+	return nil
 }
 
 // snapPeerInfo represents a short summary of the `snap` sub-protocol metadata known
@@ -46,14 +71,32 @@ type snapPeerInfo struct {
 	Version uint `json:"version"` // Snapshot protocol version negotiated
 }
 
+// stcPeerInfo represents a short summary of the `stc` sub-protocol metadata known
+// about a connected peer.
+type stcPeerInfo struct {
+	Version uint `json:"version"` // stc protocol version negotiated
+}
+
 // snapPeer is a wrapper around snap.Peer to maintain a few extra metadata.
 type snapPeer struct {
 	*snap.Peer
 }
 
+// stcPeer is a wrapper around stc.Peer to maintain a few extra metadata.
+type stcPeer struct {
+	*stc.Peer
+}
+
 // info gathers and returns some `snap` protocol metadata known about a peer.
 func (p *snapPeer) info() *snapPeerInfo {
 	return &snapPeerInfo{
+		Version: p.Version(),
+	}
+}
+
+// info gathers and returns some `stc` protocol metadata known about a peer.
+func (p *stcPeer) info() *stcPeerInfo {
+	return &stcPeerInfo{
 		Version: p.Version(),
 	}
 }

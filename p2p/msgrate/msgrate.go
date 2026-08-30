@@ -171,8 +171,7 @@ func (t *Tracker) Capacity(kind uint64, targetRTT time.Duration) int {
 // roundCapacity gives the integer value of a capacity.
 // The result fits int32, and is guaranteed to be positive.
 func roundCapacity(cap float64) int {
-	const maxInt32 = float64(1<<31 - 1)
-	return int(math.Min(maxInt32, math.Max(1, math.Ceil(cap))))
+	return int(min(math.MaxInt32, max(1, math.Ceil(cap))))
 }
 
 // Update modifies the peer's capacity values for a specific data type with a new
@@ -378,10 +377,7 @@ func (t *Trackers) TargetTimeout() time.Duration {
 // targetTimeout is the internal lockless version of TargetTimeout to be used
 // during QoS tuning.
 func (t *Trackers) targetTimeout() time.Duration {
-	timeout := time.Duration(ttlScaling * float64(t.roundtrip) / t.confidence)
-	if timeout > t.OverrideTTLLimit {
-		timeout = t.OverrideTTLLimit
-	}
+	timeout := min(time.Duration(ttlScaling*float64(t.roundtrip)/t.confidence), t.OverrideTTLLimit)
 	return timeout
 }
 

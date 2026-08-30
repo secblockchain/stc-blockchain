@@ -1,0 +1,65 @@
+services:
+  genesis:
+    image: stc-genesis
+    env_file: .env
+    environment:
+      NUMS_OF_VALIDATOR: 1
+    volumes:
+      - ./storage:/root/storage
+      - ./scripts:/root/scripts
+      - ./config:/root/config
+      - ./init-holders:/root/init-holders
+    command: /root/scripts/bootstrap.sh
+  
+  stc-rpc:
+    image: stc
+    healthcheck:
+      test: nc -z localhost 8545
+      interval: 3s
+      timeout: 5s
+      retries: 15
+    env_file: .env
+    environment:
+      NODE_ID: stc-rpc
+    volumes:
+      - ./storage/stc-rpc:/root/.ethereum
+      - ./scripts:/scripts
+      - ./config:/config
+    entrypoint: [ "sh", "-c", "/scripts/stc-rpc.sh" ]
+    networks:
+      default:
+        ipv4_address: 99.1.0.3
+
+  stc-validator1:
+    image: stc
+    env_file: .env
+    environment:
+      NODE_ID: stc-validator1
+      BOOTSTRAP_HOST: stc-rpc
+    volumes:
+      - ./storage/stc-validator1:/root/.ethereum
+      - ./scripts:/scripts
+    entrypoint: [ "sh", "-c", "/scripts/stc-validator.sh" ]
+    networks:
+      default:
+        ipv4_address: 99.1.0.2
+  
+  truffle-test:
+    image: truffle-test
+    command: /scripts/truffle-test.sh
+    env_file: .env
+    environment:
+      RPC_HOST: stc-rpc
+      RPC_PORT: 8545
+    volumes:
+      - ./scripts:/scripts
+    depends_on:
+      stc-rpc:
+        condition: service_healthy
+
+networks:
+  default:
+    ipam:
+      driver: default
+      config:
+        - subnet: 99.1.0.0/16

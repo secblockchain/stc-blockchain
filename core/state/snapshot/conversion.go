@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common/gopool"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -49,16 +51,6 @@ type (
 	// returns the subtrie root with the specified subtrie identifier.
 	leafCallbackFn func(db ethdb.KeyValueWriter, accountHash, codeHash common.Hash, stat *generateStats) (common.Hash, error)
 )
-
-// GenerateAccountTrieRoot takes an account iterator and reproduces the root hash.
-func GenerateAccountTrieRoot(it AccountIterator) (common.Hash, error) {
-	return generateTrieRoot(nil, "", it, common.Hash{}, stackTrieGenerate, nil, newGenerateStats(), true)
-}
-
-// GenerateStorageTrieRoot takes a storage iterator and reproduces the root hash.
-func GenerateStorageTrieRoot(account common.Hash, it StorageIterator) (common.Hash, error) {
-	return generateTrieRoot(nil, "", it, account, stackTrieGenerate, nil, newGenerateStats(), true)
-}
 
 // GenerateTrie takes the whole snapshot tree as the input, traverses all the
 // accounts as well as the corresponding storages and regenerate the whole state
@@ -181,20 +173,16 @@ func (stat *generateStats) report() {
 		// If there's progress on the account trie, estimate the time to finish crawling it
 		if done := binary.BigEndian.Uint64(stat.head[:8]) / stat.accounts; done > 0 {
 			var (
-				left  = (math.MaxUint64 - binary.BigEndian.Uint64(stat.head[:8])) / stat.accounts
-				speed = done/uint64(time.Since(stat.start)/time.Millisecond+1) + 1 // +1s to avoid division by zero
-				eta   = time.Duration(left/speed) * time.Millisecond
+				left = (math.MaxUint64 - binary.BigEndian.Uint64(stat.head[:8])) / stat.accounts
+				eta  = common.CalculateETA(done, left, time.Since(stat.start))
 			)
 			// If there are large contract crawls in progress, estimate their finish time
 			for acc, head := range stat.slotsHead {
 				start := stat.slotsStart[acc]
 				if done := binary.BigEndian.Uint64(head[:8]); done > 0 {
-					var (
-						left  = math.MaxUint64 - binary.BigEndian.Uint64(head[:8])
-						speed = done/uint64(time.Since(start)/time.Millisecond+1) + 1 // +1s to avoid division by zero
-					)
+					left := math.MaxUint64 - binary.BigEndian.Uint64(head[:8])
 					// Override the ETA if larger than the largest until now
-					if slotETA := time.Duration(left/speed) * time.Millisecond; eta < slotETA {
+					if slotETA := common.CalculateETA(done, left, time.Since(start)); eta < slotETA {
 						eta = slotETA
 					}
 				}
@@ -316,7 +304,8 @@ func generateTrieRoot(db ethdb.KeyValueWriter, scheme string, it Iterator, accou
 				if err != nil {
 					return stop(err)
 				}
-				go func(hash common.Hash) {
+				hash := it.Hash()
+				gopool.Submit(func() {
 					subroot, err := leafCallback(db, hash, common.BytesToHash(account.CodeHash), stats)
 					if err != nil {
 						results <- err
@@ -327,7 +316,7 @@ func generateTrieRoot(db ethdb.KeyValueWriter, scheme string, it Iterator, accou
 						return
 					}
 					results <- nil
-				}(it.Hash())
+				})
 				fullData, err = rlp.EncodeToBytes(account)
 				if err != nil {
 					return stop(err)

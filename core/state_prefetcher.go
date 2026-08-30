@@ -17,78 +17,213 @@
 package core
 
 import (
+	"bytes"
+	"runtime"
 	"sync/atomic"
 
-	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/params"
+	"golang.org/x/sync/errgroup"
 )
 
-// statePrefetcher is a basic Prefetcher, which blindly executes a block on top
-// of an arbitrary state with the goal of prefetching potentially useful state
-// data from disk before the main block processor start executing.
+const prefetchMiningThread = 3
+const checkInterval = 10
+
+// statePrefetcher is a basic Prefetcher that executes transactions from a block
+// on top of the parent state, aiming to prefetch potentially useful state data
+// from disk. Transactions are executed in parallel to fully leverage the
+// SSD's read performance.
 type statePrefetcher struct {
-	config *params.ChainConfig // Chain configuration options
-	bc     *BlockChain         // Canonical block chain
-	engine consensus.Engine    // Consensus engine used for block rewards
+	config     *params.ChainConfig // Chain configuration options
+	chain      *HeaderChain        // Canonical block chain
+	mevEnabled bool                // Indicate whether MEV is enabled
 }
 
-// newStatePrefetcher initialises a new statePrefetcher.
-func newStatePrefetcher(config *params.ChainConfig, bc *BlockChain, engine consensus.Engine) *statePrefetcher {
+// NewStatePrefetcher initialises a new statePrefetcher.
+func NewStatePrefetcher(config *params.ChainConfig, chain *HeaderChain) *statePrefetcher {
 	return &statePrefetcher{
 		config: config,
-		bc:     bc,
-		engine: engine,
+		chain:  chain,
 	}
+}
+
+// EnableMevMode enables MEV mode for this prefetcher.
+func (p *statePrefetcher) EnableMevMode() {
+	p.mevEnabled = true
 }
 
 // Prefetch processes the state changes according to the Ethereum rules by running
 // the transaction messages using the statedb, but any changes are discarded. The
-// only goal is to pre-cache transaction signatures and state trie nodes.
-func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, cfg vm.Config, interrupt *atomic.Bool) {
+// only goal is to warm the state caches.
+func (p *statePrefetcher) Prefetch(transactions types.Transactions, header *types.Header, gasLimit uint64, statedb *state.StateDB, cfg vm.Config, interrupt *atomic.Bool) {
 	var (
-		header       = block.Header()
-		gaspool      = new(GasPool).AddGas(block.GasLimit())
-		blockContext = NewEVMBlockContext(header, p.bc, nil)
-		evm          = vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
-		signer       = types.MakeSigner(p.config, header.Number, header.Time)
+		fails   atomic.Int64
+		signer  = types.MakeSigner(p.config, header.Number, header.Time)
+		workers errgroup.Group
+		reader  = statedb.Reader()
 	)
+	workers.SetLimit(max(1, 3*runtime.NumCPU()/5)) // Aggressively run the prefetching
+
 	// Iterate over and process the individual transactions
-	byzantium := p.config.IsByzantium(block.Number())
-	for i, tx := range block.Transactions() {
-		// If block precaching was interrupted, abort
-		if interrupt != nil && interrupt.Load() {
-			return
-		}
-		// Convert the transaction into an executable message and pre-cache its sender
-		msg, err := TransactionToMessage(tx, signer, header.BaseFee)
-		if err != nil {
-			return // Also invalid block, bail out
-		}
-		statedb.SetTxContext(tx.Hash(), i)
-		if err := precacheTransaction(msg, p.config, gaspool, statedb, header, evm); err != nil {
-			return // Ugh, something went horribly wrong, bail out
-		}
-		// If we're pre-byzantium, pre-load trie nodes for the intermediate root
-		if !byzantium {
-			statedb.IntermediateRoot(true)
-		}
+	for i, tx := range transactions {
+		stateCpy := statedb.Copy() // closure
+		workers.Go(func() error {
+			// If block precaching was interrupted, abort
+			if interrupt != nil && interrupt.Load() {
+				return nil
+			}
+			// Preload the touched accounts and storage slots in advance
+			sender, err := types.Sender(signer, tx)
+			if err != nil {
+				fails.Add(1)
+				return nil
+			}
+			reader.Account(sender)
+
+			if tx.To() != nil {
+				account, _ := reader.Account(*tx.To())
+
+				// Preload the contract code if the destination has non-empty code
+				if account != nil && !bytes.Equal(account.CodeHash, types.EmptyCodeHash.Bytes()) {
+					reader.Code(*tx.To(), common.BytesToHash(account.CodeHash))
+				}
+			}
+			for _, list := range tx.AccessList() {
+				reader.Account(list.Address)
+				if len(list.StorageKeys) > 0 {
+					for _, slot := range list.StorageKeys {
+						reader.Storage(list.Address, slot)
+					}
+				}
+			}
+			// Execute the message to preload the implicit touched states
+			evm := vm.NewEVM(NewEVMBlockContext(header, p.chain, nil), stateCpy, p.config, cfg)
+			defer evm.Release()
+
+			// Convert the transaction into an executable message and pre-cache its sender
+			msg, err := TransactionToMessage(tx, signer, header.BaseFee)
+			if err != nil {
+				fails.Add(1)
+				return nil // Also invalid block, bail out
+			}
+			// Disable the nonce check
+			msg.SkipNonceChecks = true
+
+			stateCpy.SetTxContext(tx.Hash(), i)
+
+			// We attempt to apply a transaction. The goal is not to execute
+			// the transaction successfully, rather to warm up touched data slots.
+			if _, err := ApplyMessage(evm, msg, nil); err != nil {
+				fails.Add(1)
+				return nil // Ugh, something went horribly wrong, bail out
+			}
+			return nil
+		})
 	}
-	// If were post-byzantium, pre-load trie nodes for the final root hash
-	if byzantium {
-		statedb.IntermediateRoot(true)
-	}
+	workers.Wait()
+
+	blockPrefetchTxsValidMeter.Mark(int64(len(transactions)) - fails.Load())
+	blockPrefetchTxsInvalidMeter.Mark(fails.Load())
+	return
 }
 
-// precacheTransaction attempts to apply a transaction to the given state database
-// and uses the input parameters for its environment. The goal is not to execute
-// the transaction successfully, rather to warm up touched data slots.
-func precacheTransaction(msg *Message, config *params.ChainConfig, gaspool *GasPool, statedb *state.StateDB, header *types.Header, evm *vm.EVM) error {
-	// Update the evm with the new transaction context.
-	evm.Reset(NewEVMTxContext(msg), statedb)
-	// Add addresses to access list if applicable
-	_, err := ApplyMessage(evm, msg, gaspool)
-	return err
+// PrefetchMining processes the state changes according to the Ethereum rules by running
+// the transaction messages using the statedb, but any changes are discarded. The
+// only goal is to warm the state caches. Only used for mining stage.
+func (p *statePrefetcher) PrefetchMining(txs TransactionsByPriceAndNonce, header *types.Header, gasLimit uint64, statedb *state.StateDB, cfg vm.Config, interruptCh <-chan struct{}, txCurr *atomic.Pointer[types.Transaction]) {
+	if statedb == nil {
+		return
+	}
+	var (
+		reader = statedb.Reader()
+		signer = types.MakeSigner(p.config, header.Number, header.Time)
+	)
+
+	// When MEV is not enabled, use more threads for local mining
+	threadCount := prefetchMiningThread
+	if !p.mevEnabled {
+		threadCount = max(prefetchMiningThread, 3*runtime.NumCPU()/5)
+	}
+
+	txCh := make(chan *types.Transaction, 2*threadCount)
+	for i := 0; i < threadCount; i++ {
+		go func(startCh <-chan *types.Transaction, stopCh <-chan struct{}) {
+			newStatedb := statedb.Copy()
+			evm := vm.NewEVM(NewEVMBlockContext(header, p.chain, nil), newStatedb, p.config, cfg)
+			idx := 0
+			// Iterate over and process the individual transactions
+			for {
+				select {
+				case tx := <-startCh:
+					// Preload the touched accounts and storage slots in advance
+					sender, err := types.Sender(signer, tx)
+					if err == nil {
+						reader.Account(sender)
+					}
+
+					if tx.To() != nil {
+						account, _ := reader.Account(*tx.To())
+
+						// Preload the contract code if the destination has non-empty code
+						if account != nil && !bytes.Equal(account.CodeHash, types.EmptyCodeHash.Bytes()) {
+							reader.Code(*tx.To(), common.BytesToHash(account.CodeHash))
+						}
+					}
+					for _, list := range tx.AccessList() {
+						reader.Account(list.Address)
+						if len(list.StorageKeys) > 0 {
+							for _, slot := range list.StorageKeys {
+								reader.Storage(list.Address, slot)
+							}
+						}
+					}
+
+					// Convert the transaction into an executable message and pre-cache its sender
+					msg, err := TransactionToMessage(tx, signer, header.BaseFee)
+					if err != nil {
+						continue // Skip invalid tx from txpool
+					}
+					// Disable the nonce check
+					msg.SkipNonceChecks = true
+
+					idx++
+					newStatedb.SetTxContext(tx.Hash(), idx)
+					ApplyMessage(evm, msg, NewGasPool(gasLimit))
+
+				case <-stopCh:
+					return
+				}
+			}
+		}(txCh, interruptCh)
+	}
+	go func(txset TransactionsByPriceAndNonce) {
+		count := 0
+		for {
+			select {
+			case <-interruptCh:
+				return
+			default:
+				if count++; count%checkInterval == 0 {
+					if curr := txCurr.Load(); curr != nil {
+						txset.Forward(curr)
+					}
+				}
+				tx := txset.PeekWithUnwrap()
+				if tx == nil {
+					return
+				}
+
+				select {
+				case <-interruptCh:
+					return
+				case txCh <- tx:
+				}
+
+				txset.Shift()
+			}
+		}
+	}(txs)
 }

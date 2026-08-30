@@ -17,27 +17,45 @@
 package core
 
 import (
+	"time"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-// NewTxsEvent is posted when a batch of transactions enter the transaction pool.
+// NewTxsEvent is posted when a batch of transactions enters the transaction pool.
 type NewTxsEvent struct{ Txs []*types.Transaction }
 
-// NewMinedBlockEvent is posted when a block has been imported.
+// NewSealedBlockEvent is posted when a block has been sealed.
+type NewSealedBlockEvent struct{ Block *types.Block }
+
+// NewMinedBlockEvent is posted when a block has been mined.
 type NewMinedBlockEvent struct{ Block *types.Block }
 
 // RemovedLogsEvent is posted when a reorg happens
 type RemovedLogsEvent struct{ Logs []*types.Log }
 
+// NewVoteEvent is posted when a batch of votes enters the vote pool.
+type NewVoteEvent struct{ Vote *types.VoteEnvelope }
+
+// FinalizedHeaderEvent is posted when a finalized header is reached.
+type FinalizedHeaderEvent struct{ Header *types.Header }
+
 type ChainEvent struct {
-	Block *types.Block
-	Hash  common.Hash
-	Logs  []*types.Log
+	Header       *types.Header
+	Receipts     []*types.Receipt
+	Transactions []*types.Transaction
 }
 
-type ChainSideEvent struct {
-	Block *types.Block
+type ChainHeadEvent struct {
+	Header *types.Header
 }
 
-type ChainHeadEvent struct{ Block *types.Block }
+type HighestVerifiedBlockEvent struct{ Header *types.Header }
+
+// NewPayloadEvent is posted when engine_newPayloadVX processes a block.
+type NewPayloadEvent struct {
+	Hash           common.Hash
+	Number         uint64
+	ProcessingTime time.Duration
+}

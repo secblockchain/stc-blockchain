@@ -44,7 +44,7 @@ func main() {
 		natdesc     = flag.String("nat", "none", "port mapping mechanism (any|none|upnp|pmp|pmp:<IP>|extip:<IP>)")
 		netrestrict = flag.String("netrestrict", "", "restrict network communication to the given IP networks (CIDR masks)")
 		runv5       = flag.Bool("v5", false, "run a v5 topic discovery bootnode")
-		verbosity   = flag.Int("verbosity", 3, "log verbosity (0-5)")
+		verbosity   = flag.Int("verbosity", int(log.LvlInfo), "log verbosity (0-5)")
 		vmodule     = flag.String("vmodule", "", "log verbosity pattern")
 
 		nodeKey *ecdsa.PrivateKey
@@ -121,11 +121,11 @@ func main() {
 			listenerAddr = natAddr
 		}
 	}
-
 	printNotice(&nodeKey.PublicKey, *listenerAddr)
 	cfg := discover.Config{
 		PrivateKey:  nodeKey,
 		NetRestrict: restrictList,
+		IsBootnode:  true,
 	}
 	if *runv5 {
 		if _, err := discover.ListenV5(conn, ln, cfg); err != nil {

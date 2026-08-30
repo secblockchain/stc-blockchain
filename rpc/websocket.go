@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -47,7 +48,7 @@ var wsBufferPool = new(sync.Pool)
 //
 // allowedOrigins should be a comma-separated list of allowed origin URLs.
 // To allow connections with any origin, pass "*".
-func (s *Server) WebsocketHandler(allowedOrigins []string) http.Handler {
+func (s *Server) WebsocketHandler(allowedOrigins []string, messageSizeLimit int64) http.Handler {
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  wsReadBuffer,
 		WriteBufferSize: wsWriteBuffer,
@@ -60,7 +61,11 @@ func (s *Server) WebsocketHandler(allowedOrigins []string) http.Handler {
 			log.Debug("WebSocket upgrade failed", "err", err)
 			return
 		}
-		codec := newWebsocketCodec(conn, r.Host, r.Header, wsDefaultReadLimit)
+		limit := s.wsReadLimit
+		if messageSizeLimit > 0 {
+			limit = messageSizeLimit
+		}
+		codec := newWebsocketCodec(conn, r.Host, r.Header, limit)
 		s.ServeCodec(codec, 0)
 	})
 }
@@ -120,6 +125,10 @@ func (e wsHandshakeError) Error() string {
 		s += " (HTTP status " + e.status + ")"
 	}
 	return s
+}
+
+func (e wsHandshakeError) Unwrap() error {
+	return e.err
 }
 
 func originIsAllowed(allowedOrigins mapset.Set[string], browserOrigin string) bool {
@@ -232,9 +241,7 @@ func newClientTransportWS(endpoint string, cfg *clientConfig) (reconnectFunc, er
 	if err != nil {
 		return nil, err
 	}
-	for key, values := range cfg.httpHeaders {
-		header[key] = values
-	}
+	maps.Copy(header, cfg.httpHeaders)
 
 	connect := func(ctx context.Context) (ServerCodec, error) {
 		header := header.Clone()
@@ -320,6 +327,16 @@ func newWebsocketCodec(conn *websocket.Conn, host string, req http.Header, readL
 }
 
 func (wc *websocketCodec) close() {
+	// Send a WebSocket Close frame before closing the underlying connection,
+	// so the server sees a clean 1000 (normal closure) instead of 1006 (abnormal).
+	wc.jsonCodec.encMu.Lock()
+	wc.conn.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+		time.Now().Add(wsPingWriteTimeout),
+	)
+	wc.jsonCodec.encMu.Unlock()
+
 	wc.jsonCodec.close()
 	wc.wg.Wait()
 }
