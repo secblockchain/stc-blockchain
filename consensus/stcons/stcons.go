@@ -249,6 +249,13 @@ type Stcons struct {
 	validatorSetABI abi.ABI
 	slashABI        abi.ABI
 	stakeHubABI     abi.ABI
+
+	// genesisValsOnce caches validators parsed from the genesis header extraData.
+	// These addresses are always kept in the active validator set (union with the
+	// system-contract mining set), so breathe-block updateValidatorSetV2 cannot drop them.
+	genesisValsOnce sync.Once
+	genesisVals     []common.Address
+	genesisVoteKeys map[common.Address]types.BLSPublicKey
 }
 
 // New creates a Stcons consensus engine.
@@ -1770,6 +1777,10 @@ func (p *Stcons) getCurrentValidators(blockHash common.Hash, blockNum *big.Int) 
 	for i := 0; i < len(valSet); i++ {
 		voteAddrMap[valSet[i]] = &(voteAddrSet)[i]
 	}
+
+	// Always keep genesis validators in the active set, even if the system contract
+	// was rewritten by updateValidatorSetV2 without them.
+	valSet, voteAddrMap = p.unionGenesisValidators(valSet, voteAddrMap)
 	return valSet, voteAddrMap, nil
 }
 
