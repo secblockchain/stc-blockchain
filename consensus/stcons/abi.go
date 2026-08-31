@@ -692,16 +692,6 @@ const validatorSetABI = `
         "internalType": "address"
       },
       {
-        "name": "feeAddress",
-        "type": "address",
-        "internalType": "address payable"
-      },
-      {
-        "name": "BBCFeeAddress",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
         "name": "votingPower",
         "type": "uint64",
         "internalType": "uint64"

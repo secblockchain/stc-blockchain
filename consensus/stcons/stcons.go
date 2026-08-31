@@ -55,9 +55,9 @@ const (
 
 	checkpointInterval = 1024 // Number of blocks after which to save the snapshot to the database
 
-	defaultEpochLength   uint64 = 1000 // Number of blocks between validator-set checkpoints
-	defaultBlockInterval uint64 = 3000 // Block interval in milliseconds
-	defaultTurnLength    uint8  = 1    // Consecutive number of blocks a validator receives priority for block production
+	defaultEpochLength   uint64 = 10000 // Number of blocks between validator-set checkpoints
+	defaultBlockInterval uint64 = 3000  // Block interval in milliseconds
+	defaultTurnLength    uint8  = 1     // Consecutive number of blocks a validator receives priority for block production
 
 	extraVanity      = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
 	extraSeal        = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
