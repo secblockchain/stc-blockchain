@@ -88,20 +88,14 @@ var (
 	attestationVoteCountGauge         = metrics.NewRegisteredGauge("stcons/attestation/voteCount", nil)
 
 	systemContracts = map[common.Address]bool{
-		common.HexToAddress(systemcontracts.ValidatorContract):          true,
-		common.HexToAddress(systemcontracts.SlashContract):              true,
-		common.HexToAddress(systemcontracts.SystemRewardContract):       true,
-		common.HexToAddress(systemcontracts.LightClientContract):        true,
-		common.HexToAddress(systemcontracts.RelayerHubContract):         true,
-		common.HexToAddress(systemcontracts.GovHubContract):             true,
-		common.HexToAddress(systemcontracts.TokenHubContract):           true,
-		common.HexToAddress(systemcontracts.RelayerIncentivizeContract): true,
-		common.HexToAddress(systemcontracts.CrossChainContract):         true,
-		common.HexToAddress(systemcontracts.StakeHubContract):           true,
-		common.HexToAddress(systemcontracts.GovernorContract):           true,
-		common.HexToAddress(systemcontracts.GovTokenContract):           true,
-		common.HexToAddress(systemcontracts.TimelockContract):           true,
-		common.HexToAddress(systemcontracts.TokenRecoverPortalContract): true,
+		common.HexToAddress(systemcontracts.ValidatorContract):    true,
+		common.HexToAddress(systemcontracts.SlashContract):        true,
+		common.HexToAddress(systemcontracts.SystemRewardContract): true,
+		common.HexToAddress(systemcontracts.GovHubContract):       true,
+		common.HexToAddress(systemcontracts.StakeHubContract):     true,
+		common.HexToAddress(systemcontracts.GovernorContract):     true,
+		common.HexToAddress(systemcontracts.GovTokenContract):     true,
+		common.HexToAddress(systemcontracts.TimelockContract):     true,
 	}
 )
 
@@ -1844,11 +1838,6 @@ func (p *Stcons) initContract(state vm.StateDB, header *types.Header, chain core
 	contracts := []string{
 		systemcontracts.ValidatorContract,
 		systemcontracts.SlashContract,
-		systemcontracts.LightClientContract,
-		systemcontracts.RelayerHubContract,
-		systemcontracts.TokenHubContract,
-		systemcontracts.RelayerIncentivizeContract,
-		systemcontracts.CrossChainContract,
 	}
 	// get packed data
 	data, err := p.validatorSetABI.Pack(method)
