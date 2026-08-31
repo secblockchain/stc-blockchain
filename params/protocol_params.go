@@ -210,7 +210,7 @@ var (
 	MinBlocksForBlobRequests           uint64 = uint64(float64(MinTimeDurationForBlobRequests) / 0.45)
 	DefaultExtraReserveForBlobRequests uint64 = uint64(24 * 3600 / 0.45) //` it adds more time for expired blobs for some request cases, like expiry blob when remote peer is syncing, default 1 day.
 
-	BreatheBlockInterval uint64 = 24 * 3600 // Controls the interval for updateValidatorSetV2
+	BreatheBlockInterval uint64 = 24 * 3600 // Controls the interval for updateValidatorSet
 
 	// used for testing:
 	//     [1,9] except 2 --> used as turn length directly

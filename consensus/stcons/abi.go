@@ -1276,7 +1276,7 @@ const validatorSetABI = `
   },
   {
     "type": "function",
-    "name": "updateValidatorSetV2",
+    "name": "updateValidatorSet",
     "inputs": [
       {
         "name": "_consensusAddrs",

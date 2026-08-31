@@ -22,7 +22,7 @@ import (
 )
 
 // genesisValidatorVotingPower is the compressed voting power written into
-// updateValidatorSetV2 for genesis validators that are not present in StakeHub
+// updateValidatorSet for genesis validators that are not present in StakeHub
 // election results. It is intentionally small but non-zero so they remain in the set.
 const genesisValidatorVotingPower = uint64(1)
 
@@ -121,7 +121,7 @@ func (p *Stcons) unionGenesisValidators(valSet []common.Address, voteAddrMap map
 }
 
 // mergeElectedWithGenesis ensures genesis validators are always present in the
-// set written by updateValidatorSetV2. Genesis validators come first; elected
+// set written by updateValidatorSet. Genesis validators come first; elected
 // validators from StakeHub that are not already genesis entries follow.
 func mergeElectedWithGenesis(
 	elected []common.Address,
@@ -180,7 +180,7 @@ func mergeElectedWithGenesis(
 	return outAddrs, outPowers, outVotes
 }
 
-func (p *Stcons) updateValidatorSetV2(state vm.StateDB, header *types.Header, chain core.ChainContext,
+func (p *Stcons) updateValidatorSet(state vm.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mode systemTxMode, tracer *tracing.Hooks,
 ) error {
 	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
@@ -201,14 +201,14 @@ func (p *Stcons) updateValidatorSetV2(state vm.StateDB, header *types.Header, ch
 	)
 
 	if len(eValidators) == 0 {
-		log.Warn("skip updateValidatorSetV2: no elected validators")
+		log.Warn("skip updateValidatorSet: no elected validators")
 		return nil
 	}
 
-	method := "updateValidatorSetV2"
+	method := "updateValidatorSet"
 	data, err := p.validatorSetABI.Pack(method, eValidators, eVotingPowers, eVoteAddrs)
 	if err != nil {
-		log.Error("Unable to pack tx for updateValidatorSetV2", "error", err)
+		log.Error("Unable to pack tx for updateValidatorSet", "error", err)
 		return err
 	}
 

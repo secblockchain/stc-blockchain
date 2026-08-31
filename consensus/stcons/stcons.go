@@ -248,7 +248,7 @@ type Stcons struct {
 
 	// genesisValsOnce caches validators parsed from the genesis header extraData.
 	// These addresses are always kept in the active validator set (union with the
-	// system-contract mining set), so breathe-block updateValidatorSetV2 cannot drop them.
+	// system-contract mining set), so breathe-block updateValidatorSet cannot drop them.
 	genesisValsOnce sync.Once
 	genesisVals     []common.Address
 	genesisVoteKeys map[common.Address]types.BLSPublicKey
@@ -1325,7 +1325,7 @@ func (p *Stcons) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 
 	// update validators every day
 	if isBreatheBlock(parent.Time, header.Time) {
-		if err := p.updateValidatorSetV2(state, header, cx, txs, receipts, systemTxs, usedGas, systemTxImporting, tracer); err != nil {
+		if err := p.updateValidatorSet(state, header, cx, txs, receipts, systemTxs, usedGas, systemTxImporting, tracer); err != nil {
 			return err
 		}
 	}
@@ -1401,7 +1401,7 @@ func (p *Stcons) finalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 
 	// update validators every day
 	if isBreatheBlock(parent.Time, header.Time) {
-		if err := p.updateValidatorSetV2(state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, mode, tracer); err != nil {
+		if err := p.updateValidatorSet(state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, mode, tracer); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -1775,7 +1775,7 @@ func (p *Stcons) getCurrentValidators(blockHash common.Hash, blockNum *big.Int) 
 	}
 
 	// Always keep genesis validators in the active set, even if the system contract
-	// was rewritten by updateValidatorSetV2 without them.
+	// was rewritten by updateValidatorSet without them.
 	valSet, voteAddrMap = p.unionGenesisValidators(valSet, voteAddrMap)
 	return valSet, voteAddrMap, nil
 }

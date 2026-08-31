@@ -19,7 +19,7 @@ import (
 var signableSystemTxSelectors = map[string][4]byte{
 	"deposit":                  {0xf3, 0x40, 0xfa, 0x01},
 	"distributeFinalityReward": {0x30, 0x0c, 0x35, 0x67},
-	"updateValidatorSetV2":     {0x1e, 0x4c, 0x15, 0x24},
+	"updateValidatorSet":       {0xe6, 0x92, 0xf0, 0x6b},
 }
 
 type expectedSystemTxEntry struct {
@@ -90,7 +90,7 @@ func (p *Stcons) isSignableSystemTx(tx *types.Transaction) bool {
 
 // expectedSystemTxShape returns the expected trailing system-tx order for accepted BidBlocks:
 //
-//	deposit -> distributeFinalityReward (cond.) -> updateValidatorSetV2 (cond.)
+//	deposit -> distributeFinalityReward (cond.) -> updateValidatorSet (cond.)
 //
 // Precondition: BidBlock admission has already enforced a non-zero deposit value.
 func (p *Stcons) expectedSystemTxShape(header, parent *types.Header) []expectedSystemTxEntry {
@@ -110,8 +110,8 @@ func (p *Stcons) expectedSystemTxShape(header, parent *types.Header) []expectedS
 
 	if isBreatheBlock(parent.Time, header.Time) {
 		shape = append(shape, expectedSystemTxEntry{
-			method:   "updateValidatorSetV2",
-			selector: p.selectorFor("updateValidatorSetV2"),
+			method:   "updateValidatorSet",
+			selector: p.selectorFor("updateValidatorSet"),
 		})
 	}
 
