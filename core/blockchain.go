@@ -682,7 +682,6 @@ func (bc *BlockChain) NoTries() bool {
 
 func (bc *BlockChain) cacheReceipts(hash common.Hash, receipts types.Receipts, block *types.Block) {
 	// TODO, This is a hot fix for the block hash of logs is `0x0000000000000000000000000000000000000000000000000000000000000000` for system tx
-	// Please check details in https://github.com/secblockchain/stc-blockchain/issues/443
 	// This is a temporary fix, the official fix should be a hard fork.
 	const possibleSystemReceipts = 3 // One slash tx, two reward distribute txs.
 	numOfReceipts := len(receipts)

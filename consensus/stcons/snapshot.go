@@ -352,9 +352,17 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 					VoteAddress: voteAddrs[idx],
 				}
 			}
-			snap.Recents = make(map[uint64]common.Address)
+			// Only wipe Recents when the validator set actually changes. With 2
+			// validators and turnLength=1, minerHistoryCheckLen is 1, so this
+			// epoch-switch runs at block 1 and would otherwise clear the just-
+			// recorded Recents entry — allowing the same validator to seal
+			// block 2 and then stall waiting for a peer that never shared a tip.
+			sameSet := validatorSetEqual(snap.Validators, newVals)
+			if !sameSet {
+				snap.Recents = make(map[uint64]common.Address)
+				log.Debug("Recents are cleared up", "blockNumber", number)
+			}
 			snap.Recents[epochKey] = common.Address{}
-			log.Debug("Recents are cleared up", "blockNumber", number)
 			snap.Validators = newVals
 			validators := snap.validators()
 			for idx, val := range validators {
@@ -378,6 +386,30 @@ func (s *Snapshot) validators() []common.Address {
 	}
 	sort.Sort(validatorsAscending(validators))
 	return validators
+}
+
+// validatorSetEqual reports whether two validator maps contain the same
+// addresses and BLS vote keys. Index is ignored.
+func validatorSetEqual(a, b map[common.Address]*ValidatorInfo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for addr, infoA := range a {
+		infoB, ok := b[addr]
+		if !ok {
+			return false
+		}
+		if infoA == nil || infoB == nil {
+			if infoA != infoB {
+				return false
+			}
+			continue
+		}
+		if infoA.VoteAddress != infoB.VoteAddress {
+			return false
+		}
+	}
+	return true
 }
 
 // lastBlockInOneTurn returns if the block at height `blockNumber` is the last block in current turn.
