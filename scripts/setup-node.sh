@@ -169,9 +169,9 @@ print_next_steps() {
   printf "${CYAN}RPC node:${NC}\n"
   printf "  bash %s/start-node.sh ./genesis.json ./node-data\n\n" "${SCRIPT_DIR}"
   printf "${CYAN}Validator:${NC}\n"
-  printf "  bash %s/create-account.sh\n" "${SCRIPT_DIR}"
-  printf "  # add the printed address to genesis extraData\n"
-  printf "  bash %s/start-node.sh --genesis ./genesis.json --datadir ./node-data --validator\n" "${SCRIPT_DIR}"
+  printf "  bash %s/create-account.sh --datadir ./node-data\n" "${SCRIPT_DIR}"
+  printf "  # add the printed address to genesis extraData (stcons format)\n"
+  printf "  bash %s/start-node.sh --genesis ./node-data/genesis.json --datadir ./node-data --validator --image %s\n" "${SCRIPT_DIR}" "${IMAGE}"
   printf "  bash %s/start-node.sh --genesis ./genesis.json --datadir ./node-data --validator --bootnodes \"enode://...@ip:30303\"\n\n" "${SCRIPT_DIR}"
 }
 

@@ -113,7 +113,7 @@ parse_args() {
       --rpc) MODE="rpc" ;;
       --validator)
         MODE="validator"
-        HTTP_API="eth,net,web3,txpool,clique,miner,admin"
+        HTTP_API="eth,net,web3,txpool,stcons,miner,admin,debug"
         WS_API="eth,net,web3,txpool"
         ;;
       --datadir)
@@ -272,23 +272,61 @@ remove_existing_container() {
   docker_bin rm -f "${CONTAINER_NAME}" >/dev/null
 }
 
-keystore_address() {
+normalize_address() {
+  addr="$(printf '%s' "$1" | tr -d '[:space:]')"
+  case "${addr}" in
+    0x|0X) addr="" ;;
+    0x*) addr="0x$(printf '%s' "${addr#0x}" | tr '[:upper:]' '[:lower:]')" ;;
+    *) addr="0x$(printf '%s' "${addr}" | tr '[:upper:]' '[:lower:]')" ;;
+  esac
+  printf '%s\n' "${addr}"
+}
+
+list_keystore_addresses() {
   find "${DATADIR}/keystore" -maxdepth 1 -type f -name 'UTC--*' 2>/dev/null \
     | sed -n 's/.*--\([a-fA-F0-9]\{40\}\)$/\1/p' \
-    | head -n1 \
-    | awk '{ if ($0 != "") print "0x" tolower($0) }'
+    | awk '{ print "0x" tolower($0) }'
+}
+
+keystore_address() {
+  list_keystore_addresses | head -n1
+}
+
+keystore_has_address() {
+  target="$(normalize_address "$1")"
+  while IFS= read -r addr; do
+    [ -n "${addr}" ] || continue
+    if [ "${addr}" = "${target}" ]; then
+      return 0
+    fi
+  done <<EOF
+$(list_keystore_addresses)
+EOF
+  return 1
 }
 
 load_account_from_datadir() {
   if [ -n "${UNLOCK}" ]; then
+    UNLOCK="$(normalize_address "${UNLOCK}")"
     return
   fi
+
+  ks_addr="$(keystore_address || true)"
+  if [ -n "${ks_addr}" ]; then
+    UNLOCK="${ks_addr}"
+  fi
+
   if [ -f "${DATADIR}/address.txt" ]; then
-    UNLOCK="$(tr -d '[:space:]' < "${DATADIR}/address.txt")"
+    file_addr="$(normalize_address "$(tr -d '[:space:]' < "${DATADIR}/address.txt")")"
+    if [ -n "${file_addr}" ]; then
+      if [ -z "${UNLOCK}" ]; then
+        UNLOCK="${file_addr}"
+      elif [ "${file_addr}" != "${UNLOCK}" ]; then
+        warn "address.txt (${file_addr}) does not match keystore (${UNLOCK}); using keystore address"
+      fi
+    fi
   fi
-  if [ -z "${UNLOCK}" ]; then
-    UNLOCK="$(keystore_address || true)"
-  fi
+
   if [ -z "${UNLOCK}" ]; then
     UNLOCK="$(
       docker_bin run --rm \
@@ -299,17 +337,35 @@ load_account_from_datadir() {
         | awk '{ gsub(/[{}]/, "", $3); if ($3 != "") print $3 }' \
         | head -n1
     )"
+    UNLOCK="$(normalize_address "${UNLOCK}")"
   fi
 }
 
 require_validator_datadir() {
   if [ ! -d "${DATADIR}/keystore" ] || [ -z "$(ls -A "${DATADIR}/keystore" 2>/dev/null || true)" ]; then
-    die "No validator keystore in ${DATADIR}. Run: bash ${SCRIPT_DIR}/create-account.sh"
+    die "No validator keystore in ${DATADIR}. Run: bash ${SCRIPT_DIR}/create-account.sh --datadir ${DATADIR}"
   fi
   [ -f "${DATADIR}/password.txt" ] || die "No password file at ${DATADIR}/password.txt. Run create-account.sh first."
   load_account_from_datadir
   [ -n "${UNLOCK}" ] || die "Could not read the validator address from ${DATADIR}. Run create-account.sh first."
+  if ! keystore_has_address "${UNLOCK}"; then
+    die "No keystore key for ${UNLOCK} in ${DATADIR}/keystore. Re-run create-account.sh --datadir ${DATADIR}, or pass --unlock with an address that exists in the keystore."
+  fi
   info "Using validator account ${UNLOCK} from ${DATADIR}"
+}
+
+resolve_paths() {
+  if [ -n "${DATADIR_INPUT}" ]; then
+    DATADIR="$(abspath "${DATADIR_INPUT}")"
+  else
+    DATADIR="$(abspath "${DATADIR}")"
+  fi
+
+  if [ -n "${GENESIS_INPUT}" ]; then
+    GENESIS_FILE="$(resolve_genesis "${GENESIS_INPUT}")"
+  else
+    GENESIS_FILE="$(resolve_genesis "${GENESIS_FILE}")"
+  fi
 }
 
 init_genesis() {
@@ -441,6 +497,7 @@ EOF
 
 main() {
   parse_args "$@"
+  resolve_paths
 
   mkdir -p "${DATADIR}"
 
