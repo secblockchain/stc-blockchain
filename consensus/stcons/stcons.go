@@ -73,7 +73,7 @@ const (
 	collectAdditionalVotesRewardRatio = 100 // ratio of additional reward for collecting more votes than needed, the denominator is 100
 
 	// `finalityRewardInterval` should be smaller than `inMemorySnapshots`, otherwise, it will result in excessive computation.
-	finalityRewardInterval = 200
+	finalityRewardInterval = 10000
 
 	kAncestorGenerationDepth = 3
 )
