@@ -2326,7 +2326,7 @@ const stakeABI = `
   },
   {
     "inputs": [],
-    "name": "BREATHE_BLOCK_INTERVAL",
+        "name": "BREATHE_BLOCK_INTERVAL",
     "outputs": [
       {
         "internalType": "uint256",
@@ -2338,109 +2338,109 @@ const stakeABI = `
     "type": "function"
   },
   {
-    "inputs": [],
+        "inputs": [],
     "name": "CODE_OK",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint32",
-        "name": "",
+                "name": "",
         "type": "uint32"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "DEAD_ADDRESS",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "address",
-        "name": "",
+                "name": "",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "INIT_MAX_NUMBER_NODE_ID",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "LOCK_AMOUNT",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "REDELEGATE_FEE_RATE_BASE",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "bytes32[]",
-        "name": "nodeIDs",
+                "name": "nodeIDs",
         "type": "bytes32[]"
-      }
-    ],
+            }
+        ],
     "name": "addNodeIDs",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "account",
+                "name": "account",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "addToBlackList",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "",
+                "name": "",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "agentToOperator",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "address",
-        "name": "",
+                "name": "",
         "type": "address"
       }
     ],
@@ -2461,352 +2461,352 @@ const stakeABI = `
     "type": "function"
   },
   {
-    "inputs": [
-      {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "",
+                "name": "",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "blackList",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "bool",
-        "name": "",
+                "name": "",
         "type": "bool"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      },
-      {
+            },
+            {
         "internalType": "uint256",
-        "name": "requestNumber",
+                "name": "requestNumber",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "name": "claim",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address[]",
-        "name": "operatorAddresses",
+                "name": "operatorAddresses",
         "type": "address[]"
-      },
-      {
+            },
+            {
         "internalType": "uint256[]",
-        "name": "requestNumbers",
+                "name": "requestNumbers",
         "type": "uint256[]"
-      }
-    ],
+            }
+        ],
     "name": "claimBatch",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "",
+                "name": "",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "consensusExpiration",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "",
+                "name": "",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "consensusToOperator",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "address",
-        "name": "",
+                "name": "",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "consensusAddress",
+                "name": "consensusAddress",
         "type": "address"
-      },
-      {
+            },
+            {
         "internalType": "bytes",
-        "name": "voteAddress",
+                "name": "voteAddress",
         "type": "bytes"
-      },
-      {
+            },
+            {
         "internalType": "bytes",
-        "name": "blsProof",
+                "name": "blsProof",
         "type": "bytes"
-      },
-      {
-        "components": [
-          {
+            },
+            {
+                "components": [
+                    {
             "internalType": "uint64",
-            "name": "rate",
+                        "name": "rate",
             "type": "uint64"
-          },
-          {
+                    },
+                    {
             "internalType": "uint64",
-            "name": "maxRate",
+                        "name": "maxRate",
             "type": "uint64"
-          },
-          {
+                    },
+                    {
             "internalType": "uint64",
-            "name": "maxChangeRate",
+                        "name": "maxChangeRate",
             "type": "uint64"
-          }
+                    }
         ],
         "internalType": "struct StakeHub.Commission",
         "name": "commission",
         "type": "tuple"
-      },
-      {
-        "components": [
-          {
+            },
+            {
+                "components": [
+                    {
             "internalType": "string",
-            "name": "moniker",
+                        "name": "moniker",
             "type": "string"
-          },
-          {
+                    },
+                    {
             "internalType": "string",
-            "name": "identity",
+                        "name": "identity",
             "type": "string"
-          },
-          {
+                    },
+                    {
             "internalType": "string",
-            "name": "website",
+                        "name": "website",
             "type": "string"
-          },
-          {
+                    },
+                    {
             "internalType": "string",
-            "name": "details",
+                        "name": "details",
             "type": "string"
-          }
+                    }
         ],
         "internalType": "struct StakeHub.Description",
         "name": "description",
         "type": "tuple"
-      }
-    ],
+            }
+        ],
     "name": "createValidator",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "payable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      },
-      {
+            },
+            {
         "internalType": "bool",
-        "name": "delegateVotePower",
+                "name": "delegateVotePower",
         "type": "bool"
-      }
-    ],
+            }
+        ],
     "name": "delegate",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "payable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "consensusAddress",
+                "name": "consensusAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "distributeReward",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "payable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "consensusAddress",
+                "name": "consensusAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "doubleSignSlash",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "downtimeJailTime",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "consensusAddress",
+                "name": "consensusAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "downtimeSlash",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "downtimeSlashAmount",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "uint64",
-        "name": "commissionRate",
+                "name": "commissionRate",
         "type": "uint64"
-      }
-    ],
+            }
+        ],
     "name": "editCommissionRate",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "newConsensusAddress",
+                "name": "newConsensusAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "editConsensusAddress",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "components": [
-          {
+    },
+    {
+        "inputs": [
+            {
+                "components": [
+                    {
             "internalType": "string",
-            "name": "moniker",
+                        "name": "moniker",
             "type": "string"
-          },
-          {
+                    },
+                    {
             "internalType": "string",
-            "name": "identity",
+                        "name": "identity",
             "type": "string"
-          },
-          {
+                    },
+                    {
             "internalType": "string",
-            "name": "website",
+                        "name": "website",
             "type": "string"
-          },
-          {
+                    },
+                    {
             "internalType": "string",
-            "name": "details",
+                        "name": "details",
             "type": "string"
-          }
+                    }
         ],
         "internalType": "struct StakeHub.Description",
         "name": "description",
         "type": "tuple"
-      }
-    ],
+            }
+        ],
     "name": "editDescription",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "bytes",
-        "name": "newVoteAddress",
+                "name": "newVoteAddress",
         "type": "bytes"
-      },
-      {
+            },
+            {
         "internalType": "bytes",
-        "name": "blsProof",
+                "name": "blsProof",
         "type": "bytes"
-      }
-    ],
+            }
+        ],
     "name": "editVoteAddress",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "evictionJailTime",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "evictionSlashAmount",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
       }
     ],
@@ -2838,334 +2838,334 @@ const stakeABI = `
     "type": "function"
   },
   {
-    "inputs": [],
+        "inputs": [],
     "name": "getProtector",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "address",
-        "name": "",
+                "name": "",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "getValidatorAgent",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "address",
-        "name": "",
+                "name": "",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "getValidatorBasicInfo",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "createdTime",
+                "name": "createdTime",
         "type": "uint256"
-      },
-      {
+            },
+            {
         "internalType": "bool",
-        "name": "jailed",
+                "name": "jailed",
         "type": "bool"
-      },
-      {
+            },
+            {
         "internalType": "uint256",
-        "name": "jailUntil",
+                "name": "jailUntil",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "getValidatorCommission",
-    "outputs": [
-      {
-        "components": [
-          {
+        "outputs": [
+            {
+                "components": [
+                    {
             "internalType": "uint64",
-            "name": "rate",
+                        "name": "rate",
             "type": "uint64"
-          },
-          {
+                    },
+                    {
             "internalType": "uint64",
-            "name": "maxRate",
+                        "name": "maxRate",
             "type": "uint64"
-          },
-          {
+                    },
+                    {
             "internalType": "uint64",
-            "name": "maxChangeRate",
+                        "name": "maxChangeRate",
             "type": "uint64"
-          }
+                    }
         ],
         "internalType": "struct StakeHub.Commission",
         "name": "",
         "type": "tuple"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "getValidatorConsensusAddress",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "address",
-        "name": "consensusAddress",
+                "name": "consensusAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "getValidatorCreditContract",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "address",
-        "name": "creditContract",
+                "name": "creditContract",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "getValidatorDescription",
-    "outputs": [
-      {
-        "components": [
-          {
+        "outputs": [
+            {
+                "components": [
+                    {
             "internalType": "string",
-            "name": "moniker",
+                        "name": "moniker",
             "type": "string"
-          },
-          {
+                    },
+                    {
             "internalType": "string",
-            "name": "identity",
+                        "name": "identity",
             "type": "string"
-          },
-          {
+                    },
+                    {
             "internalType": "string",
-            "name": "website",
+                        "name": "website",
             "type": "string"
-          },
-          {
+                    },
+                    {
             "internalType": "string",
-            "name": "details",
+                        "name": "details",
             "type": "string"
-          }
+                    }
         ],
         "internalType": "struct StakeHub.Description",
         "name": "",
         "type": "tuple"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "uint256",
-        "name": "offset",
+                "name": "offset",
         "type": "uint256"
-      },
-      {
+            },
+            {
         "internalType": "uint256",
-        "name": "limit",
+                "name": "limit",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "name": "getValidatorElectionInfo",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "address[]",
-        "name": "consensusAddrs",
+                "name": "consensusAddrs",
         "type": "address[]"
-      },
-      {
+            },
+            {
         "internalType": "uint256[]",
-        "name": "votingPowers",
+                "name": "votingPowers",
         "type": "uint256[]"
-      },
-      {
+            },
+            {
         "internalType": "bytes[]",
-        "name": "voteAddrs",
+                "name": "voteAddrs",
         "type": "bytes[]"
-      },
-      {
+            },
+            {
         "internalType": "uint256",
-        "name": "totalLength",
+                "name": "totalLength",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      },
-      {
+            },
+            {
         "internalType": "uint256",
-        "name": "index",
+                "name": "index",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "name": "getValidatorRewardRecord",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      },
-      {
+            },
+            {
         "internalType": "uint256",
-        "name": "index",
+                "name": "index",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "name": "getValidatorTotalPooledSEPRecord",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "getValidatorUpdateTime",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "getValidatorVoteAddress",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "bytes",
-        "name": "voteAddress",
+                "name": "voteAddress",
         "type": "bytes"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "uint256",
-        "name": "offset",
+                "name": "offset",
         "type": "uint256"
-      },
-      {
+            },
+            {
         "internalType": "uint256",
-        "name": "limit",
+                "name": "limit",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "name": "getValidators",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "address[]",
-        "name": "operatorAddrs",
+                "name": "operatorAddrs",
         "type": "address[]"
-      },
-      {
+            },
+            {
         "internalType": "address[]",
-        "name": "creditAddrs",
+                "name": "creditAddrs",
         "type": "address[]"
-      },
-      {
+            },
+            {
         "internalType": "uint256",
-        "name": "totalLength",
+                "name": "totalLength",
         "type": "uint256"
       }
     ],
@@ -3173,194 +3173,194 @@ const stakeABI = `
     "type": "function"
   },
   {
-    "inputs": [],
+        "inputs": [],
     "name": "initialize",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "isPaused",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "bool",
-        "name": "",
+                "name": "",
         "type": "bool"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "bytes",
-        "name": "voteAddress",
+                "name": "voteAddress",
         "type": "bytes"
-      }
-    ],
+            }
+        ],
     "name": "maliciousVoteSlash",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "maxElectedValidators",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "maxEvictionsPerEpoch",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "maxNodeIDs",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "minDelegationSEPChange",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "minSelfDelegationSEP",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "numOfJailed",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "pause",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "srcValidator",
+                "name": "srcValidator",
         "type": "address"
-      },
-      {
+            },
+            {
         "internalType": "address",
-        "name": "dstValidator",
+                "name": "dstValidator",
         "type": "address"
-      },
-      {
+            },
+            {
         "internalType": "uint256",
-        "name": "shares",
+                "name": "shares",
         "type": "uint256"
-      },
-      {
+            },
+            {
         "internalType": "bool",
-        "name": "delegateVotePower",
+                "name": "delegateVotePower",
         "type": "bool"
-      }
-    ],
+            }
+        ],
     "name": "redelegate",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "redelegateFeeRate",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "account",
+                "name": "account",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "removeFromBlackList",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "bytes32[]",
-        "name": "targetNodeIDs",
+                "name": "targetNodeIDs",
         "type": "bytes32[]"
-      }
-    ],
+            }
+        ],
     "name": "removeNodeIDs",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [],
+    },
+    {
+        "inputs": [],
     "name": "resume",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
   },
@@ -3378,130 +3378,130 @@ const stakeABI = `
     "type": "function"
   },
   {
-    "inputs": [
-      {
+        "inputs": [
+            {
         "internalType": "address[]",
-        "name": "operatorAddresses",
+                "name": "operatorAddresses",
         "type": "address[]"
-      },
-      {
+            },
+            {
         "internalType": "address",
-        "name": "account",
+                "name": "account",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "syncGovToken",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "unbondPeriod",
-    "outputs": [
-      {
+    },
+    {
+        "inputs": [],
+        "name": "unbondPeriod",
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      },
-      {
+            },
+            {
         "internalType": "uint256",
-        "name": "shares",
+                "name": "shares",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "name": "undelegate",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "operatorAddress",
+                "name": "operatorAddress",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "unjail",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "address",
-        "name": "newAgent",
+                "name": "newAgent",
         "type": "address"
-      }
-    ],
+            }
+        ],
     "name": "updateAgent",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "string",
-        "name": "key",
+                "name": "key",
         "type": "string"
-      },
-      {
+            },
+            {
         "internalType": "bytes",
-        "name": "value",
+                "name": "value",
         "type": "bytes"
-      }
-    ],
+            }
+        ],
     "name": "updateParam",
-    "outputs": [],
+        "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "bytes",
-        "name": "",
+                "name": "",
         "type": "bytes"
-      }
-    ],
+            }
+        ],
     "name": "voteExpiration",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "uint256",
-        "name": "",
+                "name": "",
         "type": "uint256"
-      }
-    ],
+            }
+        ],
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
+    },
+    {
+        "inputs": [
+            {
         "internalType": "bytes",
-        "name": "",
+                "name": "",
         "type": "bytes"
-      }
-    ],
+            }
+        ],
     "name": "voteToOperator",
-    "outputs": [
-      {
+        "outputs": [
+            {
         "internalType": "address",
-        "name": "",
+                "name": "",
         "type": "address"
       }
     ],
@@ -3511,6 +3511,6 @@ const stakeABI = `
   {
     "stateMutability": "payable",
     "type": "receive"
-  }
+    }
 ]
 `
