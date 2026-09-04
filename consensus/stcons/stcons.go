@@ -1288,6 +1288,11 @@ func (p *Stcons) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			return errors.New("init contract failed")
 		}
 	}
+	if p.chainConfig.IsOnSTCStaking(header.Number, parent.Time, header.Time) {
+		if err := p.initStakingContracts(state, header, cx, txs, receipts, systemTxs, usedGas, systemTxImporting, tracer); err != nil {
+			return errors.New("init staking contracts failed")
+		}
+	}
 	if header.Difficulty.Cmp(diffInTurn) != 0 {
 		snap, err := p.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
 		if err != nil {
@@ -1372,6 +1377,11 @@ func (p *Stcons) finalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		err := p.initContract(state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, mode, tracer)
 		if err != nil {
 			return nil, nil, errors.New("init contract failed")
+		}
+	}
+	if p.chainConfig.IsOnSTCStaking(header.Number, parent.Time, header.Time) {
+		if err := p.initStakingContracts(state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, mode, tracer); err != nil {
+			return nil, nil, errors.New("init staking contracts failed")
 		}
 	}
 	if header.Difficulty.Cmp(diffInTurn) != 0 {
@@ -1851,6 +1861,42 @@ func (p *Stcons) initContract(state vm.StateDB, header *types.Header, chain core
 		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0)
 		// apply message
 		log.Trace("init contract", "block hash", header.Hash(), "contract", c)
+		err = p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// initStakingContracts initialises the staking & governance system contracts
+// (StakeHub, GovToken, Governor, Timelock) with zero-gas system transactions at
+// the STCStaking fork transition. This is the STC equivalent of BSC parlia's
+// initializeFeynmanContract: without it the contracts stay deployed-but-dormant,
+// because their initialize() functions can only be executed as system
+// transactions by the block producer. It runs exactly once, on the first block
+// whose timestamp is >= ChainConfig.STCStakingTime (see IsOnSTCStaking).
+func (p *Stcons) initStakingContracts(state vm.StateDB, header *types.Header, chain core.ChainContext,
+	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mode systemTxMode, tracer *tracing.Hooks) error {
+	// method
+	method := "initialize"
+	// contracts, in dependency order (GovToken/Governor/Timelock read StakeHub)
+	contracts := []string{
+		systemcontracts.StakeHubContract,
+		systemcontracts.GovTokenContract,
+		systemcontracts.GovernorContract,
+		systemcontracts.TimelockContract,
+	}
+	// initialize() takes no arguments on all four contracts, so one packed
+	// selector serves them all.
+	data, err := p.stakeHubABI.Pack(method)
+	if err != nil {
+		log.Error("Unable to pack tx for initialize staking contracts", "error", err)
+		return err
+	}
+	for _, c := range contracts {
+		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0)
+		log.Info("initialize staking contract", "block", header.Number, "contract", c)
 		err = p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer)
 		if err != nil {
 			return err

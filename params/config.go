@@ -255,6 +255,7 @@ var (
 		BPO1Time:            nil,                   // will be skipped in STC
 		BPO2Time:            nil,                   // will be skipped in STC
 		AmsterdamTime:       nil,
+		STCStakingTime:      nil, // TODO(ops): set to the activation unix timestamp to schedule the staking hard fork (see docs/stc/staking-activation.md)
 
 		Stcons: &StconsConfig{},
 		BlobScheduleConfig: &BlobScheduleConfig{
@@ -310,6 +311,7 @@ var (
 		BPO1Time:            nil,                   // will be skipped in STC
 		BPO2Time:            nil,                   // will be skipped in STC
 		AmsterdamTime:       nil,
+		STCStakingTime:      nil, // TODO(ops): set to the activation unix timestamp to schedule the staking hard fork (see docs/stc/staking-activation.md)
 
 		Stcons: &StconsConfig{},
 		BlobScheduleConfig: &BlobScheduleConfig{
@@ -680,6 +682,7 @@ type ChainConfig struct {
 	BPO5Time       *uint64 `json:"bpo5Time,omitempty"`       // BPO5 switch time (nil = no fork, 0 = already on bpo5)
 	AmsterdamTime  *uint64 `json:"amsterdamTime,omitempty"`  // Amsterdam switch time (nil = no fork, 0 = already on amsterdam)
 	UBTTime        *uint64 `json:"ubtTime,omitempty"`        // UBT switch time (nil = no fork, 0 = already on UBT)
+	STCStakingTime *uint64 `json:"stcStakingTime,omitempty"` // STC staking activation fork: initialises StakeHub/GovToken/Governor/Timelock via system txs (nil = not scheduled)
 
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
@@ -884,10 +887,14 @@ func (c *ChainConfig) String() string {
 		BPO2Time = big.NewInt(0).SetUint64(*c.BPO2Time)
 	}
 
+	var STCStakingTime *big.Int
+	if c.STCStakingTime != nil {
+		STCStakingTime = big.NewInt(0).SetUint64(*c.STCStakingTime)
+	}
 	return fmt.Sprintf("{ChainID: %v, Engine: %v, Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Ramanujan: %v, Niels: %v, "+
 		"MirrorSync: %v, Bruno: %v, Berlin: %v, YOLO v3: %v, CatalystBlock: %v, London: %v, ArrowGlacier: %v, MergeFork:%v, Euler: %v, Gibbs: %v, Nano: %v, Moran: %v, Planck: %v,Luban: %v, Plato: %v, Hertz: %v, Hertzfix: %v, "+
 		"ShanghaiTime: %v, KeplerTime: %v, FeynmanTime: %v, FeynmanFixTime: %v, CancunTime: %v, HaberTime: %v, HaberFixTime: %v, BohrTime: %v, PascalTime: %v, PragueTime: %v, LorentzTime: %v, MaxwellTime: %v, FermiTime: %v, "+
-		"OsakaTime: %v, MendelTime: %v, PasteurTime: %v, BPO1Time: %v, BPO2Time: %v}",
+		"OsakaTime: %v, MendelTime: %v, PasteurTime: %v, BPO1Time: %v, BPO2Time: %v, STCStakingTime: %v}",
 		c.ChainID,
 		engine,
 		c.HomesteadBlock,
@@ -938,6 +945,7 @@ func (c *ChainConfig) String() string {
 		PasteurTime,
 		BPO1Time,
 		BPO2Time,
+		STCStakingTime,
 	)
 }
 
@@ -1426,6 +1434,21 @@ func (c *ChainConfig) IsAmsterdam(num *big.Int, time uint64) bool {
 	return c.IsLondon(num) && isTimestampForked(c.AmsterdamTime, time)
 }
 
+// IsSTCStaking returns whether time is either equal to the STCStaking fork time or greater.
+func (c *ChainConfig) IsSTCStaking(num *big.Int, time uint64) bool {
+	return c.IsLondon(num) && isTimestampForked(c.STCStakingTime, time)
+}
+
+// IsOnSTCStaking returns whether currentBlockTime is either equal to the STCStaking fork time or greater firstly.
+// The stcons engine uses it to run the one-off staking initialisation system transactions.
+func (c *ChainConfig) IsOnSTCStaking(currentBlockNumber *big.Int, lastBlockTime uint64, currentBlockTime uint64) bool {
+	lastBlockNumber := new(big.Int)
+	if currentBlockNumber.Cmp(big.NewInt(1)) >= 0 {
+		lastBlockNumber.Sub(currentBlockNumber, big.NewInt(1))
+	}
+	return !c.IsSTCStaking(lastBlockNumber, lastBlockTime) && c.IsSTCStaking(currentBlockNumber, currentBlockTime)
+}
+
 // IsUBT returns whether time is either equal to the Verkle fork time or greater.
 func (c *ChainConfig) IsUBT(num *big.Int, time uint64) bool {
 	return c.IsLondon(num) && isTimestampForked(c.UBTTime, time)
@@ -1514,6 +1537,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "osakaTime", timestamp: c.OsakaTime},
 		{name: "mendelTime", timestamp: c.MendelTime},
 		{name: "pasteurTime", timestamp: c.PasteurTime},
+		{name: "stcStakingTime", timestamp: c.STCStakingTime, optional: true}, // STC-only fork: must be scheduled at/after Pasteur (the last upstream fork STC has enabled)
 		{name: "ubtTime", timestamp: c.UBTTime, optional: true},
 		{name: "bpo1", timestamp: c.BPO1Time, optional: true},
 		{name: "bpo2", timestamp: c.BPO2Time, optional: true},
@@ -1747,6 +1771,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	}
 	if isForkTimestampIncompatible(c.UBTTime, newcfg.UBTTime, headTimestamp) {
 		return newTimestampCompatError("UBT fork timestamp", c.UBTTime, newcfg.UBTTime)
+	}
+	if isForkTimestampIncompatible(c.STCStakingTime, newcfg.STCStakingTime, headTimestamp) {
+		return newTimestampCompatError("STCStaking fork timestamp", c.STCStakingTime, newcfg.STCStakingTime)
 	}
 	if isForkTimestampIncompatible(c.BPO1Time, newcfg.BPO1Time, headTimestamp) {
 		return newTimestampCompatError("BPO1 fork timestamp", c.BPO1Time, newcfg.BPO1Time)

@@ -122,6 +122,12 @@ func applySystemContractUpgrade(upgrade *Upgrade, blockNumber *big.Int, statedb 
 			}
 		}
 
+		if strings.TrimSpace(cfg.Code) == "" {
+			// No bytecode registered for this contract: keep the code already on chain.
+			// (SetCode with empty bytes would erase the contract - never do that by accident.)
+			logger.Warn("No bytecode registered for system-contract upgrade, keeping existing code", "contract", cfg.ContractAddr.String())
+			continue
+		}
 		newContractCode, err := hex.DecodeString(strings.TrimSpace(cfg.Code))
 		if err != nil {
 			panic(fmt.Errorf("failed to decode new contract code: %s", err.Error()))
@@ -135,4 +141,39 @@ func applySystemContractUpgrade(upgrade *Upgrade, blockNumber *big.Int, statedb 
 			}
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// STCStaking fork: activates staking & governance.
+//
+// At the STCStaking fork transition the stcons engine initialises StakeHub,
+// GovToken, Governor and Timelock via system transactions (see
+// Stcons.initStakingContracts). This upgrade slot lets the fork ALSO replace the
+// StakeHub bytecode in the same block, so the parameters baked into its
+// initialize() (minimum self-stake, unbonding period, jail times, max elected
+// validators, and STC's maximum-stake cap) are the ones that get initialised.
+//
+// Paste the compiled StakeHub runtime bytecode (hex, no 0x) into
+// stakeHubStakingCode before scheduling the fork. While it is empty the slot is
+// a no-op and the StakeHub bytecode already on chain is initialised as-is.
+// ---------------------------------------------------------------------------
+var stakeHubStakingCode = "" // TODO(dev): runtime bytecode of the parameterised StakeHub
+
+func init() {
+	stakingUpgrade := func() *Upgrade {
+		return &Upgrade{
+			UpgradeName: "stc-staking-activation",
+			Configs: []*UpgradeConfig{{
+				ContractAddr: common.HexToAddress(StakeHubContract),
+				CommitUrl:    "TODO(dev): commit of the parameterised StakeHub source",
+				Code:         stakeHubStakingCode,
+			}},
+		}
+	}
+	forkUpgrades = append(forkUpgrades, forkUpgrade{
+		configs: map[string]*Upgrade{mainNet: stakingUpgrade(), stcTestnetNet: stakingUpgrade(), defaultNet: stakingUpgrade()},
+		isOn: func(c *params.ChainConfig, n *big.Int, last, now uint64) bool {
+			return c.IsOnSTCStaking(n, last, now)
+		},
+	})
 }
