@@ -75,6 +75,12 @@ const (
 	// `finalityRewardInterval` should be smaller than `inMemorySnapshots`, otherwise, it will result in excessive computation.
 	finalityRewardInterval = 10000
 
+	// Downtime slash throttling (per spoiled validator turn, not per block).
+	// With turnLength=1 and V validators, wall time ≈ turns * V * blockPeriod.
+	// Grace avoids slash spam for brief disconnects; interval sparsifies ongoing downtime.
+	downtimeSlashGraceTurns    = uint64(2000) // miss this many of their turns before the first slash tx
+	downtimeSlashIntervalTurns = uint64(1000) // after grace, emit slash only every N of their turns
+
 	kAncestorGenerationDepth = 3
 )
 
@@ -1296,7 +1302,7 @@ func (p *Stcons) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		spoiledVal := snap.inturnValidator()
 		signedRecently := snap.SignRecently(spoiledVal)
 
-		if !signedRecently {
+		if !signedRecently && snap.shouldEmitDowntimeSlash(header.Number.Uint64()) {
 			log.Trace("slash validator", "block hash", header.Hash(), "address", spoiledVal)
 			err = p.slash(spoiledVal, state, header, cx, txs, receipts, systemTxs, usedGas, systemTxImporting, tracer)
 			if err != nil {
@@ -1382,7 +1388,7 @@ func (p *Stcons) finalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		}
 		spoiledVal := snap.inturnValidator()
 		signedRecently := snap.SignRecently(spoiledVal)
-		if !signedRecently {
+		if !signedRecently && snap.shouldEmitDowntimeSlash(number) {
 			err = p.slash(spoiledVal, state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, mode, tracer)
 			if err != nil {
 				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal)

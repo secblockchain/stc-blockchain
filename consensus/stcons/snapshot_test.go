@@ -158,3 +158,34 @@ func TestTwoValidatorRecentsPreservedOnSameSetSwitch(t *testing.T) {
 		t.Fatal("a2 should not be marked recent")
 	}
 }
+
+func TestShouldEmitDowntimeSlash(t *testing.T) {
+	snap := &Snapshot{
+		TurnLength: 1,
+		Validators: map[common.Address]*ValidatorInfo{
+			common.HexToAddress("0x01"): {Index: 1},
+			common.HexToAddress("0x02"): {Index: 2},
+			common.HexToAddress("0x03"): {Index: 3},
+		},
+	}
+	// 3 validators, turnLength=1 → personalTurn = blockNumber / 3
+	// First emit at personalTurn == grace (20) → block 60
+	// Then every interval (10) → blocks 90, 120, ...
+	cases := []struct {
+		block uint64
+		want  bool
+	}{
+		{0, false},
+		{57, false}, // personalTurn 19
+		{60, true},  // personalTurn 20
+		{63, false}, // personalTurn 21
+		{87, false}, // personalTurn 29
+		{90, true},  // personalTurn 30
+		{120, true}, // personalTurn 40
+	}
+	for _, tc := range cases {
+		if got := snap.shouldEmitDowntimeSlash(tc.block); got != tc.want {
+			t.Fatalf("block %d: got %v, want %v", tc.block, got, tc.want)
+		}
+	}
+}

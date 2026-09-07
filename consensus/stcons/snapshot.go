@@ -417,6 +417,24 @@ func (s *Snapshot) lastBlockInOneTurn(blockNumber uint64) bool {
 	return (blockNumber+1)%uint64(s.TurnLength) == 0
 }
 
+// shouldEmitDowntimeSlash reports whether a downtime slash system tx should be
+// emitted for the in-turn validator of blockNumber. Call only when that
+// validator missed the block (!SignRecently). Throttles by their personal turn
+// index so brief disconnects and long outages do not flood every out-of-turn block.
+func (s *Snapshot) shouldEmitDowntimeSlash(blockNumber uint64) bool {
+	validators := len(s.Validators)
+	if validators == 0 || s.TurnLength == 0 {
+		return false
+	}
+	// Personal turn index for the validator whose slot this block is (0-based).
+	turnIndex := blockNumber / uint64(s.TurnLength)
+	personalTurn := turnIndex / uint64(validators)
+	if personalTurn < downtimeSlashGraceTurns {
+		return false
+	}
+	return (personalTurn-downtimeSlashGraceTurns)%downtimeSlashIntervalTurns == 0
+}
+
 // inturn returns if a validator at a given block height is in-turn or not.
 func (s *Snapshot) inturn(validator common.Address) bool {
 	return s.inturnValidator() == validator
