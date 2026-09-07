@@ -1814,7 +1814,7 @@ func (p *Stcons) distributeIncoming(val common.Address, state vm.StateDB, header
 	state.SetBalance(consensus.SystemAddress, common.U2560, tracing.BalanceDecreaseSTCDistributeReward)
 	state.AddBalance(coinbase, balance, tracing.BalanceIncreaseSTCDistributeReward)
 	log.Trace("distribute to validator contract", "block hash", header.Hash(), "amount", balance)
-	return p.distributeToValidator(balance.ToBig(), val, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer)
+	return p.distributeToValidator(balance.ToBig(), val, state, header, chain, usedGas, tracer)
 }
 
 // slash spoiled validators
@@ -1865,25 +1865,60 @@ func (p *Stcons) initContract(state vm.StateDB, header *types.Header, chain core
 	return nil
 }
 
-// distributeToValidator deposits validator reward to validator contract
+// distributeToValidator deposits validator reward to validator contract.
+// Fee deposit runs as an in-Finalize EVM call (not a packed system tx) so wallets
+// do not see a second on-chain transaction after user txs.
 func (p *Stcons) distributeToValidator(amount *big.Int, validator common.Address,
 	state vm.StateDB, header *types.Header, chain core.ChainContext,
-	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mode systemTxMode, tracer *tracing.Hooks) error {
-	// method
+	usedGas *uint64, tracer *tracing.Hooks) error {
 	method := "deposit"
-
-	// get packed data
-	data, err := p.validatorSetABI.Pack(method,
-		validator,
-	)
+	data, err := p.validatorSetABI.Pack(method, validator)
 	if err != nil {
 		log.Error("Unable to pack tx for deposit", "error", err)
 		return err
 	}
-	// get system message
 	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.ValidatorContract), data, amount)
-	// apply message
-	return p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer)
+	return p.applySystemCall(msg, state, header, chain, usedGas, tracer)
+}
+
+// applySystemCall executes a system contract call during Finalize without packing
+// it into the block transaction list (no tx, receipt, or nonce bump).
+func (p *Stcons) applySystemCall(
+	msg *core.Message,
+	state vm.StateDB,
+	header *types.Header,
+	chainContext core.ChainContext,
+	usedGas *uint64,
+	tracer *tracing.Hooks,
+) (applyErr error) {
+	// Synthetic tx context so LOG opcodes have a hash key; logs are not exported
+	// into block receipts (no accompanying transaction).
+	state.SetTxContext(common.Hash{}, state.TxIndex())
+
+	context := core.NewEVMBlockContext(header, chainContext, nil)
+	evm := vm.NewEVM(context, state, p.chainConfig, vm.Config{Tracer: tracer})
+	evm.SetTxContext(core.NewEVMTxContext(msg))
+
+	if tracer != nil {
+		if tracer.OnSystemTxStart != nil {
+			tracer.OnSystemTxStart()
+		}
+		if tracer.OnSystemTxEnd != nil {
+			defer tracer.OnSystemTxEnd()
+		}
+	}
+
+	gasUsed, err := applyMessage(msg, evm, state, header, p.chainConfig, chainContext)
+	if err != nil {
+		return err
+	}
+	if p.chainConfig.IsByzantium(header.Number) {
+		state.Finalise(true)
+	} else {
+		state.IntermediateRoot(p.chainConfig.IsEIP158(header.Number))
+	}
+	*usedGas += gasUsed
+	return nil
 }
 
 // get system message

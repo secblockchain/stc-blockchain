@@ -233,11 +233,16 @@ func (b *BidBlockArgs) ToDecodedBidBlock(builder common.Address) (*DecodedBidBlo
 		sidecars = types.BlobSidecars{}
 	}
 
+	var gasFee *big.Int
+	if b.BidBlock.GasFee != nil {
+		gasFee = new(big.Int).Set(b.BidBlock.GasFee)
+	}
 	return &DecodedBidBlock{
 		Builder:  builder,
 		Header:   types.CopyHeader(b.BidBlock.Header),
 		Txs:      txs,
 		Sidecars: sidecars,
+		GasFee:   gasFee,
 		bidHash:  b.BidBlock.Hash(),
 	}, nil
 }
@@ -260,18 +265,26 @@ type BidBlock struct {
 	Header       *types.Header      `json:"header"`
 	Transactions []hexutil.Bytes    `json:"transactions"` // user txs first, unsigned system txs last
 	Sidecars     types.BlobSidecars `json:"sidecars,omitempty"`
+	// GasFee is the total priority fee credited to SystemAddress after user txs
+	// (formerly the deposit system-tx value). Required for BidBlock ranking.
+	GasFee *big.Int `json:"gasFee"`
 
 	hash atomic.Value
 }
 
-// Hash returns the BidBlock signing hash. The header carries TxHash, and the
-// validator checks TxHash against Transactions before blind-signing.
+// Hash returns the BidBlock signing hash. The header carries TxHash (user +
+// trailing system txs). GasFee is hashed separately because fee deposit is no
+// longer encoded as a system transaction value.
 func (b *BidBlock) Hash() common.Hash {
 	if hash := b.hash.Load(); hash != nil {
 		return hash.(common.Hash)
 	}
 	start := time.Now()
-	h := b.Header.Hash()
+	gasFee := b.GasFee
+	if gasFee == nil {
+		gasFee = new(big.Int)
+	}
+	h := rlpHash([]interface{}{b.Header.Hash(), gasFee})
 	log.Debug("BidBlock Hash() computed", "number", b.Header.Number, "elapsed", time.Since(start),
 		"txs", len(b.Transactions), "sidecars", len(b.Sidecars))
 	b.hash.Store(h)

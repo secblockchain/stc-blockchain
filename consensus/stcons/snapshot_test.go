@@ -169,19 +169,20 @@ func TestShouldEmitDowntimeSlash(t *testing.T) {
 		},
 	}
 	// 3 validators, turnLength=1 → personalTurn = blockNumber / 3
-	// First emit at personalTurn == grace (20) → block 60
-	// Then every interval (10) → blocks 90, 120, ...
+	// First emit at personalTurn == grace → block = grace * 3
+	// Then every interval → blocks (grace+k*interval)*3
+	first := downtimeSlashGraceTurns * 3
+	second := (downtimeSlashGraceTurns + downtimeSlashIntervalTurns) * 3
 	cases := []struct {
 		block uint64
 		want  bool
 	}{
 		{0, false},
-		{57, false}, // personalTurn 19
-		{60, true},  // personalTurn 20
-		{63, false}, // personalTurn 21
-		{87, false}, // personalTurn 29
-		{90, true},  // personalTurn 30
-		{120, true}, // personalTurn 40
+		{first - 3, false}, // personalTurn grace-1
+		{first, true},      // personalTurn grace
+		{first + 3, false}, // personalTurn grace+1
+		{second - 3, false},
+		{second, true},
 	}
 	for _, tc := range cases {
 		if got := snap.shouldEmitDowntimeSlash(tc.block); got != tc.want {

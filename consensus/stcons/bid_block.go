@@ -17,7 +17,6 @@ import (
 )
 
 var signableSystemTxSelectors = map[string][4]byte{
-	"deposit":                  {0xf3, 0x40, 0xfa, 0x01},
 	"distributeFinalityReward": {0x30, 0x0c, 0x35, 0x67},
 	"updateValidatorSet":       {0xe6, 0x92, 0xf0, 0x6b},
 }
@@ -90,16 +89,11 @@ func (p *Stcons) isSignableSystemTx(tx *types.Transaction) bool {
 
 // expectedSystemTxShape returns the expected trailing system-tx order for accepted BidBlocks:
 //
-//	deposit -> distributeFinalityReward (cond.) -> updateValidatorSet (cond.)
+//	distributeFinalityReward (cond.) -> updateValidatorSet (cond.)
 //
-// Precondition: BidBlock admission has already enforced a non-zero deposit value.
+// Fee deposit is applied in Finalize via applySystemCall and is not a packed system tx.
 func (p *Stcons) expectedSystemTxShape(header, parent *types.Header) []expectedSystemTxEntry {
-	shape := make([]expectedSystemTxEntry, 0, 3)
-
-	shape = append(shape, expectedSystemTxEntry{
-		method:   "deposit",
-		selector: p.selectorFor("deposit"),
-	})
+	shape := make([]expectedSystemTxEntry, 0, 2)
 
 	if header.Number.Uint64()%finalityRewardInterval == 0 {
 		shape = append(shape, expectedSystemTxEntry{
@@ -135,9 +129,10 @@ func (p *Stcons) verifySystemTxShape(txs []*types.Transaction, shape []expectedS
 	return nil
 }
 
-// ExtractBidBlockDepositValue locates the trailing unsigned system-tx region and
-// returns its start index along with the value of the deposit tx (zero if absent).
-func (p *Stcons) ExtractBidBlockDepositValue(txs []*types.Transaction) (int, *big.Int) {
+// ExtractBidBlockSystemTxStart locates the trailing unsigned system-tx region and
+// returns its start index. Fee deposit is no longer a packed system tx; GasFee is
+// supplied on BidBlock.GasFee instead.
+func (p *Stcons) ExtractBidBlockSystemTxStart(txs []*types.Transaction) int {
 	systemTxStart := len(txs)
 	for i := len(txs) - 1; i >= 0; i-- {
 		if !p.isUnsignedSystemTxCandidate(txs[i]) {
@@ -145,16 +140,13 @@ func (p *Stcons) ExtractBidBlockDepositValue(txs []*types.Transaction) (int, *bi
 		}
 		systemTxStart = i
 	}
-	// Deposit is the first trailing unsigned system tx (see expectedSystemTxShape).
-	// systemTxStart == 0 means there are no preceding user txs to collect fees from,
-	// which is invalid by design — return zero GasFee so admission rejects it.
-	if systemTxStart > 0 && systemTxStart < len(txs) {
-		depositSel := p.selectorFor("deposit")
-		if bytes.HasPrefix(txs[systemTxStart].Data(), depositSel[:]) {
-			return systemTxStart, new(big.Int).Set(txs[systemTxStart].Value())
-		}
-	}
-	return systemTxStart, new(big.Int)
+	return systemTxStart
+}
+
+// ExtractBidBlockDepositValue is kept as a thin wrapper for older callers.
+// GasFee is always zero here; use BidBlock.GasFee for fee ranking.
+func (p *Stcons) ExtractBidBlockDepositValue(txs []*types.Transaction) (int, *big.Int) {
+	return p.ExtractBidBlockSystemTxStart(txs), new(big.Int)
 }
 
 // VerifyBidBlockSystemTxs validates the trailing unsigned system-tx region starting at systemTxStart.
