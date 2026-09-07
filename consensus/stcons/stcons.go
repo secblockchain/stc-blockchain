@@ -1837,28 +1837,51 @@ func (p *Stcons) slash(spoiledVal common.Address, state vm.StateDB, header *type
 	return p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer)
 }
 
-// init contract
+// initContract initializes built-in system contracts at block 1.
+//
+//	init()         → ValidatorSet, SlashIndicator
+//	initialize()   → StakeHub, GovToken, Timelock, Governor
+//
+// Skipped on purpose:
+//   - StakeCredit: per-validator clone, initialized by StakeHub on createValidator
+//   - SystemReward: lazy-inits on first claimRewards (doInit)
+//   - GovHub / SepReserve: no init/initialize entrypoint
 func (p *Stcons) initContract(state vm.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mode systemTxMode, tracer *tracing.Hooks) error {
-	// method
-	method := "init"
-	// contracts
-	contracts := []string{
+	// Legacy System.init() contracts (empty calldata, same selector).
+	initData, err := p.validatorSetABI.Pack("init")
+	if err != nil {
+		log.Error("Unable to pack tx for init", "error", err)
+		return err
+	}
+	initContracts := []string{
 		systemcontracts.ValidatorContract,
 		systemcontracts.SlashContract,
 	}
-	// get packed data
-	data, err := p.validatorSetABI.Pack(method)
+	for _, c := range initContracts {
+		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), initData, common.Big0)
+		log.Trace("init contract", "block hash", header.Hash(), "contract", c, "method", "init")
+		if err := p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer); err != nil {
+			return err
+		}
+	}
+
+	// OpenZeppelin initializer contracts (empty initialize(), same selector).
+	initializeData, err := p.stakeHubABI.Pack("initialize")
 	if err != nil {
-		log.Error("Unable to pack tx for init validator set", "error", err)
+		log.Error("Unable to pack tx for initialize", "error", err)
 		return err
 	}
-	for _, c := range contracts {
-		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0)
-		// apply message
-		log.Trace("init contract", "block hash", header.Hash(), "contract", c)
-		err = p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer)
-		if err != nil {
+	initializeContracts := []string{
+		systemcontracts.StakeHubContract,
+		systemcontracts.GovTokenContract,
+		systemcontracts.TimelockContract,
+		systemcontracts.GovernorContract,
+	}
+	for _, c := range initializeContracts {
+		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), initializeData, common.Big0)
+		log.Trace("init contract", "block hash", header.Hash(), "contract", c, "method", "initialize")
+		if err := p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer); err != nil {
 			return err
 		}
 	}
