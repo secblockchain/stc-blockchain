@@ -24,6 +24,7 @@ GETH_DATADIR="/data"
 GENESIS_INPUT=""
 DATADIR_INPUT=""
 MODE="rpc"
+ENABLE_RPC=0
 BOOTNODES=""
 UNLOCK=""
 NETWORK_ID=""
@@ -58,7 +59,7 @@ contains the keystore.
 
 Options:
   -h, --help                Show this help
-  --rpc                     Run as an RPC node (default)
+  --rpc                     Enable HTTP/WS JSON-RPC (default off; combinable with --validator)
   --validator               Unlock the account in node-data and mine
   --datadir PATH            Same as the <node-data> argument
   --name NAME               Docker container name (default: ${CONTAINER_NAME})
@@ -110,7 +111,12 @@ parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
       -h|--help) usage; exit 0 ;;
-      --rpc) MODE="rpc" ;;
+      --rpc)
+        ENABLE_RPC=1
+        if [ "${MODE}" != "validator" ]; then
+          MODE="rpc"
+        fi
+        ;;
       --validator)
         MODE="validator"
         HTTP_API="eth,net,web3,txpool,stcons,miner,admin,debug"
@@ -411,13 +417,36 @@ wait_for_rpc() {
   warn "RPC did not respond yet. Check logs: docker logs -f ${CONTAINER_NAME}"
 }
 
+wait_for_ipc() {
+  info "Waiting for IPC at /tmp/geth.ipc"
+  i=0
+  while [ "${i}" -lt 30 ]; do
+    if ! docker_bin inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" 2>/dev/null | grep -qx true; then
+      warn "Container ${CONTAINER_NAME} is not running. Check logs: docker logs -f ${CONTAINER_NAME}"
+      return 1
+    fi
+    if docker_bin exec "${CONTAINER_NAME}" test -S /tmp/geth.ipc 2>/dev/null; then
+      info "IPC is up"
+      return 0
+    fi
+    i=$((i + 1))
+    sleep 1
+  done
+  warn "IPC did not appear yet. Check logs: docker logs -f ${CONTAINER_NAME}"
+  return 1
+}
+
 print_enode() {
   enode="$(
     docker_bin exec "${CONTAINER_NAME}" \
       geth attach --exec 'admin.nodeInfo.enode' /tmp/geth.ipc 2>/dev/null || true
   )"
+  # geth may print Fatal on stdout when the socket is not ready yet.
+  enode="$(printf '%s' "${enode}" | tr -d '\r' | sed -n 's/^"\(enode:\/\/.*\)"$/\1/p; t; s/^\(enode:\/\/.*\)$/\1/p')"
   if [ -n "${enode}" ]; then
     info "enode: ${enode}"
+  else
+    warn "Could not read enode yet. Try: docker exec ${CONTAINER_NAME} geth attach --exec 'admin.nodeInfo.enode' /tmp/geth.ipc"
   fi
 }
 
@@ -426,23 +455,28 @@ start_container() {
   geth_args=(
     --datadir "${GETH_DATADIR}"
     --networkid "${NETWORK_ID}"
-    --http
-    --http.addr 0.0.0.0
-    --http.port 8545
-    --http.api "${HTTP_API}"
-    --http.vhosts "*"
-    --http.corsdomain "*"
-    --ws
-    --ws.addr 0.0.0.0
-    --ws.port 8546
-    --ws.api "${WS_API}"
-    --ws.origins "*"
     --port 30303
     --ipcpath /tmp/geth.ipc
     --syncmode full
     --rpc.txfeecap "${RPC_TX_FEE_CAP}"
     --verbosity 3
   )
+
+  if [ "${ENABLE_RPC}" -eq 1 ]; then
+    geth_args+=(
+      --http
+      --http.addr 0.0.0.0
+      --http.port 8545
+      --http.api "${HTTP_API}"
+      --http.vhosts "*"
+      --http.corsdomain "*"
+      --ws
+      --ws.addr 0.0.0.0
+      --ws.port 8546
+      --ws.api "${WS_API}"
+      --ws.origins "*"
+    )
+  fi
 
   if [ "${NODISCOVER}" -eq 1 ]; then
     geth_args+=(--nodiscover)
@@ -458,11 +492,16 @@ start_container() {
     --entrypoint geth
     -v "$(docker_host_path "${DATADIR}"):${GETH_DATADIR}"
     -v "$(docker_host_path "${genesis}"):/genesis.json:ro"
-    -p "${HTTP_PORT}:8545"
-    -p "${WS_PORT}:8546"
     -p "${P2P_PORT}:30303"
     -p "${P2P_PORT}:30303/udp"
   )
+
+  if [ "${ENABLE_RPC}" -eq 1 ]; then
+    docker_args+=(
+      -p "${HTTP_PORT}:8545"
+      -p "${WS_PORT}:8546"
+    )
+  fi
 
   if [ "${MODE}" = "validator" ]; then
     geth_args+=(
@@ -487,6 +526,7 @@ IMAGE=${IMAGE}
 CONTAINER_NAME=${CONTAINER_NAME}
 DATADIR=${DATADIR}
 MODE=${MODE}
+ENABLE_RPC=${ENABLE_RPC}
 NETWORK_ID=${NETWORK_ID}
 HTTP_PORT=${HTTP_PORT}
 WS_PORT=${WS_PORT}
@@ -527,12 +567,18 @@ main() {
   save_runtime
 
   info "Container ${CONTAINER_NAME} started"
-  info "HTTP-RPC: http://127.0.0.1:${HTTP_PORT}"
-  info "WS-RPC:   ws://127.0.0.1:${WS_PORT}"
+  if [ "${ENABLE_RPC}" -eq 1 ]; then
+    info "HTTP-RPC: http://127.0.0.1:${HTTP_PORT}"
+    info "WS-RPC:   ws://127.0.0.1:${WS_PORT}"
+  fi
   info "P2P:      0.0.0.0:${P2P_PORT}"
   info "Logs:     docker logs -f ${CONTAINER_NAME}"
 
-  wait_for_rpc
+  if [ "${ENABLE_RPC}" -eq 1 ]; then
+    wait_for_rpc
+  else
+    wait_for_ipc || true
+  fi
   print_enode
 }
 
