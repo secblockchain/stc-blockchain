@@ -30,8 +30,8 @@ import (
 var (
 	MainnetGenesisHash = common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
 
-	STCGenesisHash        = common.HexToHash("0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b")
-	StcTestnetGenesisHash = common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34")
+	STCGenesisHash        = common.HexToHash("0x696c38127b43b4eca5d8ed66c0c405156fc17820e3da8a8901e9f80c96783a20")
+	StcTestnetGenesisHash = common.HexToHash("0x5ac8004ac75925fab0aa288cd648302d9c3621acee6a0a494dd08fdfbee21418")
 )
 
 func newUint64(val uint64) *uint64 { return &val }

@@ -272,7 +272,7 @@ func (w *worker) handleBidBlockResult(block *types.Block, task *task) {
 	//   - Bloom         (post-execution logs bloom)
 	//   - GasUsed       (cumulative gas consumed)
 	//   - Tx precheck failures (nonce, balance, signature, intrinsic gas, ...)
-	//   - System tx value / params (e.g. deposit value vs. SystemAddress balance)
+	//   - System tx value / params (e.g. claimed GasFee vs. actual user-tx fees)
 	//   - Blob sidecar checks (KZG proofs, blob hashes)
 	verifyStart := time.Now()
 	_, insertErr := w.chain.InsertChain(types.Blocks{block})

@@ -527,6 +527,19 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 			return err
 		}
 	}
+	// Enable post-sync features early when a peer is at most one block ahead.
+	// Propagated blocks can arrive before the sync loop runs; without this they
+	// are discarded while synced is still false.
+	if !h.synced.Load() && h.downloader.ConfigSyncMode() == ethconfig.FullSync {
+		_, peerTD := peer.Head()
+		if peerTD != nil {
+			localHead := h.chain.CurrentBlock()
+			localTD := h.chain.GetTd(localHead.Hash(), localHead.Number.Uint64())
+			if localTD != nil && peerTD.Cmp(new(big.Int).Add(localTD, common.Big2)) <= 0 {
+				h.enableSyncedFeatures()
+			}
+		}
+	}
 	h.chainSync.handlePeerEvent()
 
 	// Propagate existing transactions and votes. new transactions and votes appearing

@@ -19,6 +19,7 @@ package ethconfig
 
 import (
 	"errors"
+	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -47,9 +48,17 @@ var FullNodeGPO = gasprice.Config{
 	Percentile:       60,
 	MaxHeaderHistory: 1024,
 	MaxBlockHistory:  1024,
-	MaxPrice:         gasprice.DefaultMaxPrice,
-	OracleThreshold:  1000,
-	IgnorePrice:      gasprice.DefaultIgnorePrice,
+	// Cap suggestions at well above the STC minimum tip (~2 SEP / TxGas).
+	MaxPrice:        new(big.Int).Mul(big.NewInt(params.MinimumGasPriceSTC), big.NewInt(10)),
+	OracleThreshold: 1000,
+	IgnorePrice:     gasprice.DefaultIgnorePrice,
+}
+
+// defaultTxPoolConfig returns the legacy txpool defaults with STC's minimum gas price.
+func defaultTxPoolConfig() legacypool.Config {
+	cfg := legacypool.DefaultConfig
+	cfg.PriceLimit = params.MinimumGasPriceSTC
+	return cfg
 }
 
 // Defaults contains default settings for use on the STC main net.
@@ -73,17 +82,18 @@ var Defaults = Config{
 	TriesVerifyMode:         core.LocalVerify,
 	FilterLogCacheSize:      32,
 	Miner:                   minerconfig.DefaultConfig,
-	TxPool:                  legacypool.DefaultConfig,
+	TxPool:                  defaultTxPoolConfig(),
 	BlobPool:                blobpool.DefaultConfig,
 	RPCGasCap:               50000000,
 	RPCEVMTimeout:           5 * time.Second,
 	GPO:                     FullNodeGPO,
-	RPCTxFeeCap:             1,
-	TxSyncDefaultTimeout:    5 * time.Second,
-	TxSyncMaxTimeout:        10 * time.Second,
-	SlowBlockThreshold:      -1, // Disabled by default; set via --debug.logslowblock flag
-	RangeLimit:              5000,
-	BlobExtraReserve:        params.DefaultExtraReserveForBlobRequests, // Extra reserve threshold for blob, blob never expires when -1 is set, default 28800
+	// Allow txs whose fee (gasPrice * gasLimit) exceeds 2 SEP, e.g. contract calls.
+	RPCTxFeeCap:          100,
+	TxSyncDefaultTimeout: 5 * time.Second,
+	TxSyncMaxTimeout:     10 * time.Second,
+	SlowBlockThreshold:   -1, // Disabled by default; set via --debug.logslowblock flag
+	RangeLimit:           5000,
+	BlobExtraReserve:     params.DefaultExtraReserveForBlobRequests, // Extra reserve threshold for blob, blob never expires when -1 is set, default 28800
 }
 
 //go:generate go run github.com/fjl/gencodec -type Config -formats toml -out gen_config.go

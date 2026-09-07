@@ -352,9 +352,17 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 					VoteAddress: voteAddrs[idx],
 				}
 			}
-			snap.Recents = make(map[uint64]common.Address)
+			// Only wipe Recents when the validator set actually changes. With 2
+			// validators and turnLength=1, minerHistoryCheckLen is 1, so this
+			// epoch-switch runs at block 1 and would otherwise clear the just-
+			// recorded Recents entry — allowing the same validator to seal
+			// block 2 and then stall waiting for a peer that never shared a tip.
+			sameSet := validatorSetEqual(snap.Validators, newVals)
+			if !sameSet {
+				snap.Recents = make(map[uint64]common.Address)
+				log.Debug("Recents are cleared up", "blockNumber", number)
+			}
 			snap.Recents[epochKey] = common.Address{}
-			log.Debug("Recents are cleared up", "blockNumber", number)
 			snap.Validators = newVals
 			validators := snap.validators()
 			for idx, val := range validators {
@@ -380,9 +388,51 @@ func (s *Snapshot) validators() []common.Address {
 	return validators
 }
 
+// validatorSetEqual reports whether two validator maps contain the same
+// addresses and BLS vote keys. Index is ignored.
+func validatorSetEqual(a, b map[common.Address]*ValidatorInfo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for addr, infoA := range a {
+		infoB, ok := b[addr]
+		if !ok {
+			return false
+		}
+		if infoA == nil || infoB == nil {
+			if infoA != infoB {
+				return false
+			}
+			continue
+		}
+		if infoA.VoteAddress != infoB.VoteAddress {
+			return false
+		}
+	}
+	return true
+}
+
 // lastBlockInOneTurn returns if the block at height `blockNumber` is the last block in current turn.
 func (s *Snapshot) lastBlockInOneTurn(blockNumber uint64) bool {
 	return (blockNumber+1)%uint64(s.TurnLength) == 0
+}
+
+// shouldEmitDowntimeSlash reports whether a downtime slash system tx should be
+// emitted for the in-turn validator of blockNumber. Call only when that
+// validator missed the block (!SignRecently). Throttles by their personal turn
+// index so brief disconnects and long outages do not flood every out-of-turn block.
+func (s *Snapshot) shouldEmitDowntimeSlash(blockNumber uint64) bool {
+	validators := len(s.Validators)
+	if validators == 0 || s.TurnLength == 0 {
+		return false
+	}
+	// Personal turn index for the validator whose slot this block is (0-based).
+	turnIndex := blockNumber / uint64(s.TurnLength)
+	personalTurn := turnIndex / uint64(validators)
+	if personalTurn < downtimeSlashGraceTurns {
+		return false
+	}
+	return (personalTurn-downtimeSlashGraceTurns)%downtimeSlashIntervalTurns == 0
 }
 
 // inturn returns if a validator at a given block height is in-turn or not.

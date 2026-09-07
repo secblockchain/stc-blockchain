@@ -667,7 +667,7 @@ var (
 	}
 	MinerGasPriceFlag = &flags.BigFlag{
 		Name:     "miner.gasprice",
-		Usage:    "Minimum gas price for mining a transaction",
+		Usage:    "Minimum gas price for mining a transaction (STC default: ~2 SEP per 21k-gas transfer)",
 		Value:    ethconfig.Defaults.Miner.GasPrice,
 		Category: flags.MinerCategory,
 	}
