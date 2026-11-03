@@ -31,6 +31,8 @@ NETWORK_ID=""
 HTTP_PORT="${STC_HTTP_PORT:-8545}"
 WS_PORT="${STC_WS_PORT:-8546}"
 P2P_PORT="${STC_P2P_PORT:-30303}"
+LOG_MAX_SIZE="${STC_LOG_MAX_SIZE:-100m}"
+LOG_MAX_FILE="${STC_LOG_MAX_FILE:-5}"
 HTTP_API="eth,net,web3,txpool"
 WS_API="eth,net,web3,txpool"
 # Default geth cap (100 SEP) rejects many contract txs on this chain (~2 SEP/21k gas).
@@ -71,6 +73,8 @@ Options:
   --http.port PORT          Host HTTP-RPC port (default: ${HTTP_PORT})
   --ws.port PORT            Host WebSocket-RPC port (default: ${WS_PORT})
   --port PORT               Host P2P port (default: ${P2P_PORT})
+  --log-max-size SIZE       Docker json log cap per file (default: ${LOG_MAX_SIZE})
+  --log-max-file N          Docker json log files to keep (default: ${LOG_MAX_FILE})
   --http.api APIS           HTTP RPC APIs
   --ws.api APIS             WS RPC APIs
   --force                   Replace a running container with the same name
@@ -171,6 +175,16 @@ parse_args() {
       --port)
         [ $# -ge 2 ] || die "--port requires a port"
         P2P_PORT="$2"
+        shift
+        ;;
+      --log-max-size)
+        [ $# -ge 2 ] || die "--log-max-size requires a size such as 100m"
+        LOG_MAX_SIZE="$2"
+        shift
+        ;;
+      --log-max-file)
+        [ $# -ge 2 ] || die "--log-max-file requires a count"
+        LOG_MAX_FILE="$2"
         shift
         ;;
       --http.api)
@@ -489,6 +503,9 @@ start_container() {
     run -d
     --name "${CONTAINER_NAME}"
     --restart unless-stopped
+    --log-driver json-file
+    --log-opt "max-size=${LOG_MAX_SIZE}"
+    --log-opt "max-file=${LOG_MAX_FILE}"
     --entrypoint geth
     -v "$(docker_host_path "${DATADIR}"):${GETH_DATADIR}"
     -v "$(docker_host_path "${genesis}"):/genesis.json:ro"
@@ -531,6 +548,8 @@ NETWORK_ID=${NETWORK_ID}
 HTTP_PORT=${HTTP_PORT}
 WS_PORT=${WS_PORT}
 P2P_PORT=${P2P_PORT}
+LOG_MAX_SIZE=${LOG_MAX_SIZE}
+LOG_MAX_FILE=${LOG_MAX_FILE}
 GENESIS=${GENESIS_FILE}
 EOF
 }
@@ -572,7 +591,7 @@ main() {
     info "WS-RPC:   ws://127.0.0.1:${WS_PORT}"
   fi
   info "P2P:      0.0.0.0:${P2P_PORT}"
-  info "Logs:     docker logs -f ${CONTAINER_NAME}"
+  info "Logs:     docker logs -f ${CONTAINER_NAME} (max ${LOG_MAX_SIZE} x ${LOG_MAX_FILE} files)"
 
   if [ "${ENABLE_RPC}" -eq 1 ]; then
     wait_for_rpc
