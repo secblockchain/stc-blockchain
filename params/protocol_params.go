@@ -137,7 +137,15 @@ const (
 	DefaultBaseFeeChangeDenominator = 8          // Bounds the amount the base fee can change between blocks.
 	DefaultElasticityMultiplier     = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
 	InitialBaseFee                  = 1000000000 // Initial base fee for EIP-1559 blocks.
-	InitialBaseFeeForSTC            = 0          // Initial base fee for EIP-1559 blocks on STC Mainnet
+	InitialBaseFeeForSTC            = 0          // Initial base fee for EIP-1559 blocks on STC (Stcons keeps baseFee at 0; tips go to validators).
+
+	// TransferGasFeeSTC is the target native fee (2 SEP) for a plain transfer on STC.
+	// Stcons keeps baseFee at 0, so users pay this via gasPrice / priority fee and validators receive it.
+	TransferGasFeeSTC = 2e18 // 2 SEP
+
+	// MinimumGasPriceSTC is TransferGasFeeSTC / TxGas so a 21_000-gas transfer costs ~2 SEP.
+	// Integer division: 2e18/21000 = 95238095238095; total fee = 1999999999999995000 wei (~2 SEP).
+	MinimumGasPriceSTC = 95238095238095
 
 	MaxCodeSize              = 24576                    // Maximum bytecode to permit for a contract
 	MaxInitCodeSize          = 2 * MaxCodeSize          // Maximum initcode to permit in a creation transaction and create instructions
@@ -202,7 +210,7 @@ var (
 	MinBlocksForBlobRequests           uint64 = uint64(float64(MinTimeDurationForBlobRequests) / 0.45)
 	DefaultExtraReserveForBlobRequests uint64 = uint64(24 * 3600 / 0.45) //` it adds more time for expired blobs for some request cases, like expiry blob when remote peer is syncing, default 1 day.
 
-	BreatheBlockInterval uint64 = 24 * 3600 // Controls the interval for updateValidatorSetV2
+	BreatheBlockInterval uint64 = 24 * 3600 // Controls the interval for updateValidatorSet
 
 	// used for testing:
 	//     [1,9] except 2 --> used as turn length directly

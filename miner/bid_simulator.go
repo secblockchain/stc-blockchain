@@ -742,14 +742,18 @@ func (b *bidSimulator) preSealVerifyBidBlock(decoded *buildertypes.DecodedBidBlo
 		return fmt.Errorf("invalid tx root: got %s, want %s", header.TxHash, txHash)
 	}
 
-	decoded.SystemTxStart, decoded.GasFee = stconsEngine.ExtractBidBlockDepositValue(decoded.Txs)
+	decoded.SystemTxStart = stconsEngine.ExtractBidBlockSystemTxStart(decoded.Txs)
 
-	// GasFee comes from the deposit tx value; reject overflow before bid selection.
-	if decoded.GasFee.Sign() <= 0 {
+	// GasFee is declared on BidBlock (deposit is no longer a packed system tx).
+	if decoded.GasFee == nil || decoded.GasFee.Sign() <= 0 {
 		return errors.New("empty gasFee")
 	}
 	if decoded.GasFee.BitLen() > uint256BitLen {
 		return fmt.Errorf("gasFee exceeds uint256: bitLen %d", decoded.GasFee.BitLen())
+	}
+	// Reject BidBlocks that claim fees with no preceding user txs.
+	if decoded.SystemTxStart == 0 {
+		return errors.New("empty gasFee")
 	}
 
 	// Only cheap sidecar checks run at admission; KZG is checked for the selected BidBlock.

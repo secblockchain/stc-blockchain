@@ -164,9 +164,8 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 	mode, ourTD := cs.modeAndLocalHead()
 	op := peerToSyncOp(mode, peer)
 	if op.td.Cmp(ourTD) <= 0 {
-		if !cs.handler.acceptTxs.Load() {
-			// Occurs only during a quick restart.
-			cs.handler.acceptTxs.Store(true)
+		if !cs.handler.synced.Load() {
+			cs.handler.enableSyncedFeatures()
 			log.Info("Enable transaction acceptance for already in sync.")
 		}
 		// We seem to be in sync according to the legacy rules. In the merge
@@ -189,11 +188,19 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 		// If the node is only slightly behind (e.g., 1 block), syncing is unnecessary.
 		// It's likely still processing broadcasted blocks(such as including a big tx) or block hash announcements.
 		// In most cases, the node will catch up within 2 seconds.
+		// Enable synced features before waiting so propagated blocks are not discarded
+		// while catching up on the next header.
+		if !cs.handler.synced.Load() {
+			cs.handler.enableSyncedFeatures()
+		}
 		time.Sleep(2 * time.Second)
 
 		// Re-check local head to see if it has caught up
 		if _, latestTD := cs.modeAndLocalHead(); ourTD.Cmp(latestTD) < 0 {
 			log.Trace("The local head is already caught up; synchronization is not required.")
+			if !cs.handler.synced.Load() {
+				cs.handler.enableSyncedFeatures()
+			}
 			return nil
 		}
 	}

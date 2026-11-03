@@ -55,9 +55,9 @@ const (
 
 	checkpointInterval = 1024 // Number of blocks after which to save the snapshot to the database
 
-	defaultEpochLength   uint64 = 1000 // Number of blocks between validator-set checkpoints
-	defaultBlockInterval uint64 = 3000 // Block interval in milliseconds
-	defaultTurnLength    uint8  = 1    // Consecutive number of blocks a validator receives priority for block production
+	defaultEpochLength   uint64 = 10000 // Number of blocks between validator-set checkpoints
+	defaultBlockInterval uint64 = 3000  // Block interval in milliseconds
+	defaultTurnLength    uint8  = 1     // Consecutive number of blocks a validator receives priority for block production
 
 	extraVanity      = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
 	extraSeal        = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
@@ -73,7 +73,13 @@ const (
 	collectAdditionalVotesRewardRatio = 100 // ratio of additional reward for collecting more votes than needed, the denominator is 100
 
 	// `finalityRewardInterval` should be smaller than `inMemorySnapshots`, otherwise, it will result in excessive computation.
-	finalityRewardInterval = 200
+	finalityRewardInterval = 10000
+
+	// Downtime slash throttling (per spoiled validator turn, not per block).
+	// With turnLength=1 and V validators, wall time ≈ turns * V * blockPeriod.
+	// Grace avoids slash spam for brief disconnects; interval sparsifies ongoing downtime.
+	downtimeSlashGraceTurns    = uint64(2000) // miss this many of their turns before the first slash tx
+	downtimeSlashIntervalTurns = uint64(1000) // after grace, emit slash only every N of their turns
 
 	kAncestorGenerationDepth = 3
 )
@@ -88,20 +94,16 @@ var (
 	attestationVoteCountGauge         = metrics.NewRegisteredGauge("stcons/attestation/voteCount", nil)
 
 	systemContracts = map[common.Address]bool{
-		common.HexToAddress(systemcontracts.ValidatorContract):          true,
-		common.HexToAddress(systemcontracts.SlashContract):              true,
-		common.HexToAddress(systemcontracts.SystemRewardContract):       true,
-		common.HexToAddress(systemcontracts.LightClientContract):        true,
-		common.HexToAddress(systemcontracts.RelayerHubContract):         true,
-		common.HexToAddress(systemcontracts.GovHubContract):             true,
-		common.HexToAddress(systemcontracts.TokenHubContract):           true,
-		common.HexToAddress(systemcontracts.RelayerIncentivizeContract): true,
-		common.HexToAddress(systemcontracts.CrossChainContract):         true,
-		common.HexToAddress(systemcontracts.StakeHubContract):           true,
-		common.HexToAddress(systemcontracts.GovernorContract):           true,
-		common.HexToAddress(systemcontracts.GovTokenContract):           true,
-		common.HexToAddress(systemcontracts.TimelockContract):           true,
-		common.HexToAddress(systemcontracts.TokenRecoverPortalContract): true,
+		common.HexToAddress(systemcontracts.ValidatorContract):    true,
+		common.HexToAddress(systemcontracts.SlashContract):        true,
+		common.HexToAddress(systemcontracts.SystemRewardContract): true,
+		common.HexToAddress(systemcontracts.GovHubContract):       true,
+		common.HexToAddress(systemcontracts.StakeHubContract):     true,
+		common.HexToAddress(systemcontracts.GovernorContract):     true,
+		common.HexToAddress(systemcontracts.GovTokenContract):     true,
+		common.HexToAddress(systemcontracts.TimelockContract):     true,
+		common.HexToAddress(systemcontracts.SepReserveContract):   true,
+		common.HexToAddress(systemcontracts.StakeCreditContract):  true,
 	}
 )
 
@@ -249,6 +251,13 @@ type Stcons struct {
 	validatorSetABI abi.ABI
 	slashABI        abi.ABI
 	stakeHubABI     abi.ABI
+
+	// genesisValsOnce caches validators parsed from the genesis header extraData.
+	// These addresses are always kept in the active validator set (union with the
+	// system-contract mining set), so breathe-block updateValidatorSet cannot drop them.
+	genesisValsOnce sync.Once
+	genesisVals     []common.Address
+	genesisVoteKeys map[common.Address]types.BLSPublicKey
 }
 
 // New creates a Stcons consensus engine.
@@ -1293,7 +1302,7 @@ func (p *Stcons) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		spoiledVal := snap.inturnValidator()
 		signedRecently := snap.SignRecently(spoiledVal)
 
-		if !signedRecently {
+		if !signedRecently && snap.shouldEmitDowntimeSlash(header.Number.Uint64()) {
 			log.Trace("slash validator", "block hash", header.Hash(), "address", spoiledVal)
 			err = p.slash(spoiledVal, state, header, cx, txs, receipts, systemTxs, usedGas, systemTxImporting, tracer)
 			if err != nil {
@@ -1322,7 +1331,7 @@ func (p *Stcons) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 
 	// update validators every day
 	if isBreatheBlock(parent.Time, header.Time) {
-		if err := p.updateValidatorSetV2(state, header, cx, txs, receipts, systemTxs, usedGas, systemTxImporting, tracer); err != nil {
+		if err := p.updateValidatorSet(state, header, cx, txs, receipts, systemTxs, usedGas, systemTxImporting, tracer); err != nil {
 			return err
 		}
 	}
@@ -1379,7 +1388,7 @@ func (p *Stcons) finalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		}
 		spoiledVal := snap.inturnValidator()
 		signedRecently := snap.SignRecently(spoiledVal)
-		if !signedRecently {
+		if !signedRecently && snap.shouldEmitDowntimeSlash(number) {
 			err = p.slash(spoiledVal, state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, mode, tracer)
 			if err != nil {
 				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal)
@@ -1398,7 +1407,7 @@ func (p *Stcons) finalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 
 	// update validators every day
 	if isBreatheBlock(parent.Time, header.Time) {
-		if err := p.updateValidatorSetV2(state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, mode, tracer); err != nil {
+		if err := p.updateValidatorSet(state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, mode, tracer); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -1770,6 +1779,10 @@ func (p *Stcons) getCurrentValidators(blockHash common.Hash, blockNum *big.Int) 
 	for i := 0; i < len(valSet); i++ {
 		voteAddrMap[valSet[i]] = &(voteAddrSet)[i]
 	}
+
+	// Always keep genesis validators in the active set, even if the system contract
+	// was rewritten by updateValidatorSet without them.
+	valSet, voteAddrMap = p.unionGenesisValidators(valSet, voteAddrMap)
 	return valSet, voteAddrMap, nil
 }
 
@@ -1801,7 +1814,7 @@ func (p *Stcons) distributeIncoming(val common.Address, state vm.StateDB, header
 	state.SetBalance(consensus.SystemAddress, common.U2560, tracing.BalanceDecreaseSTCDistributeReward)
 	state.AddBalance(coinbase, balance, tracing.BalanceIncreaseSTCDistributeReward)
 	log.Trace("distribute to validator contract", "block hash", header.Hash(), "amount", balance)
-	return p.distributeToValidator(balance.ToBig(), val, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer)
+	return p.distributeToValidator(balance.ToBig(), val, state, header, chain, usedGas, tracer)
 }
 
 // slash spoiled validators
@@ -1824,58 +1837,111 @@ func (p *Stcons) slash(spoiledVal common.Address, state vm.StateDB, header *type
 	return p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer)
 }
 
-// init contract
+// initContract initializes built-in system contracts at block 1.
+//
+//	init()         → ValidatorSet, SlashIndicator
+//	initialize()   → StakeHub, GovToken, Timelock, Governor
+//
+// Skipped on purpose:
+//   - StakeCredit: per-validator clone, initialized by StakeHub on createValidator
+//   - SystemReward: lazy-inits on first claimRewards (doInit)
+//   - GovHub / SepReserve: no init/initialize entrypoint
 func (p *Stcons) initContract(state vm.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mode systemTxMode, tracer *tracing.Hooks) error {
-	// method
-	method := "init"
-	// contracts
-	contracts := []string{
-		systemcontracts.ValidatorContract,
-		systemcontracts.SlashContract,
-		systemcontracts.LightClientContract,
-		systemcontracts.RelayerHubContract,
-		systemcontracts.TokenHubContract,
-		systemcontracts.RelayerIncentivizeContract,
-		systemcontracts.CrossChainContract,
-	}
-	// get packed data
-	data, err := p.validatorSetABI.Pack(method)
+	// Legacy System.init() contracts (empty calldata, same selector).
+	initData, err := p.validatorSetABI.Pack("init")
 	if err != nil {
-		log.Error("Unable to pack tx for init validator set", "error", err)
+		log.Error("Unable to pack tx for init", "error", err)
 		return err
 	}
-	for _, c := range contracts {
-		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0)
-		// apply message
-		log.Trace("init contract", "block hash", header.Hash(), "contract", c)
-		err = p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer)
-		if err != nil {
+	initContracts := []string{
+		systemcontracts.ValidatorContract,
+		systemcontracts.SlashContract,
+	}
+	for _, c := range initContracts {
+		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), initData, common.Big0)
+		log.Trace("init contract", "block hash", header.Hash(), "contract", c, "method", "init")
+		if err := p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer); err != nil {
+			return err
+		}
+	}
+
+	// OpenZeppelin initializer contracts (empty initialize(), same selector).
+	initializeData, err := p.stakeHubABI.Pack("initialize")
+	if err != nil {
+		log.Error("Unable to pack tx for initialize", "error", err)
+		return err
+	}
+	initializeContracts := []string{
+		systemcontracts.StakeHubContract,
+		systemcontracts.GovTokenContract,
+		systemcontracts.TimelockContract,
+		systemcontracts.GovernorContract,
+	}
+	for _, c := range initializeContracts {
+		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), initializeData, common.Big0)
+		log.Trace("init contract", "block hash", header.Hash(), "contract", c, "method", "initialize")
+		if err := p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// distributeToValidator deposits validator reward to validator contract
+// distributeToValidator deposits validator reward to validator contract.
+// Fee deposit runs as an in-Finalize EVM call (not a packed system tx) so wallets
+// do not see a second on-chain transaction after user txs.
 func (p *Stcons) distributeToValidator(amount *big.Int, validator common.Address,
 	state vm.StateDB, header *types.Header, chain core.ChainContext,
-	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mode systemTxMode, tracer *tracing.Hooks) error {
-	// method
+	usedGas *uint64, tracer *tracing.Hooks) error {
 	method := "deposit"
-
-	// get packed data
-	data, err := p.validatorSetABI.Pack(method,
-		validator,
-	)
+	data, err := p.validatorSetABI.Pack(method, validator)
 	if err != nil {
 		log.Error("Unable to pack tx for deposit", "error", err)
 		return err
 	}
-	// get system message
 	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.ValidatorContract), data, amount)
-	// apply message
-	return p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mode, tracer)
+	return p.applySystemCall(msg, state, header, chain, usedGas, tracer)
+}
+
+// applySystemCall executes a system contract call during Finalize without packing
+// it into the block transaction list (no tx, receipt, or nonce bump).
+func (p *Stcons) applySystemCall(
+	msg *core.Message,
+	state vm.StateDB,
+	header *types.Header,
+	chainContext core.ChainContext,
+	usedGas *uint64,
+	tracer *tracing.Hooks,
+) (applyErr error) {
+	// Synthetic tx context so LOG opcodes have a hash key; logs are not exported
+	// into block receipts (no accompanying transaction).
+	state.SetTxContext(common.Hash{}, state.TxIndex())
+
+	context := core.NewEVMBlockContext(header, chainContext, nil)
+	evm := vm.NewEVM(context, state, p.chainConfig, vm.Config{Tracer: tracer})
+	evm.SetTxContext(core.NewEVMTxContext(msg))
+
+	if tracer != nil {
+		if tracer.OnSystemTxStart != nil {
+			tracer.OnSystemTxStart()
+		}
+		if tracer.OnSystemTxEnd != nil {
+			defer tracer.OnSystemTxEnd()
+		}
+	}
+
+	gasUsed, err := applyMessage(msg, evm, state, header, p.chainConfig, chainContext)
+	if err != nil {
+		return err
+	}
+	if p.chainConfig.IsByzantium(header.Number) {
+		state.Finalise(true)
+	} else {
+		state.IntermediateRoot(p.chainConfig.IsEIP158(header.Number))
+	}
+	*usedGas += gasUsed
+	return nil
 }
 
 // get system message
